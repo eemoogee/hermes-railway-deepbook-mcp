@@ -27,12 +27,12 @@ async function muneoListReportsHandler(
   const GITHUB_REPO = process.env.GITHUB_REPO;
   const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-  if (!GITHUB_REPO || !GITHUB_TOKEN) {
+  if (!GITHUB_REPO) {
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'GITHUB_REPO and GITHUB_TOKEN environment variables are required'
+          error: 'GITHUB_REPO environment variable is required'
         }, null, 2)
       }]
     };
@@ -40,14 +40,17 @@ async function muneoListReportsHandler(
 
   const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`;
 
+  // GITHUB_TOKEN is optional — the Muneo repo (sm33f3r/muneo) is public as of Sep 2026; auth is only used to raise the GitHub API rate limit from 60/hr to 5000/hr, not for access.
+  const listHeaders: Record<string, string> = {
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'dulcibella-mcp'
+  };
+  if (GITHUB_TOKEN) {
+    listHeaders['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
+  }
+
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'dulcibella-mcp'
-      }
-    });
+    const response = await fetch(url, { headers: listHeaders });
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -112,24 +115,14 @@ async function muneoFetchReportHandler(
 
   const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-  if (!GITHUB_TOKEN) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          error: 'GITHUB_TOKEN environment variable is required'
-        }, null, 2)
-      }]
-    };
+  // GITHUB_TOKEN is optional — the Muneo repo (sm33f3r/muneo) is public as of Sep 2026; auth is only used to raise the GitHub API rate limit from 60/hr to 5000/hr, not for access.
+  const fetchHeaders: Record<string, string> = { 'User-Agent': 'dulcibella-mcp' };
+  if (GITHUB_TOKEN) {
+    fetchHeaders['Authorization'] = `Bearer ${GITHUB_TOKEN}`;
   }
 
   try {
-    const response = await fetch(download_url, {
-      headers: {
-        'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        'User-Agent': 'dulcibella-mcp'
-      }
-    });
+    const response = await fetch(download_url, { headers: fetchHeaders });
 
     if (!response.ok) {
       const errorText = await response.text();
