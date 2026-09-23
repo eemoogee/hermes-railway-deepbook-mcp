@@ -53,7 +53,15 @@ async function depositMarginHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`deposit_margin failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `deposit_margin failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`deposit_margin failed: ${message}`);
   }
 }
 
@@ -95,7 +103,15 @@ async function withdrawMarginHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`withdraw_margin failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `withdraw_margin failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`withdraw_margin failed: ${message}`);
   }
 }
 
@@ -169,7 +185,15 @@ async function borrowBaseHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`borrow_base failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `borrow_base failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`borrow_base failed: ${message}`);
   }
 }
 
@@ -199,7 +223,15 @@ async function borrowQuoteHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`borrow_quote failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `borrow_quote failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`borrow_quote failed: ${message}`);
   }
 }
 
@@ -234,7 +266,15 @@ async function repayBaseHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`repay_base failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `repay_base failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`repay_base failed: ${message}`);
   }
 }
 
@@ -269,7 +309,15 @@ async function repayQuoteHandler(
       }],
     };
   } catch (err) {
-    throw new Error(`repay_quote failed: ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('check_price_is_fresh') || message.includes('pyth::check_price_is_fresh')) {
+      throw new Error(
+        `repay_quote failed: the on-chain Pyth price oracle for this pool is stale. ` +
+        `This is a shared, external oracle refreshed by market activity — it usually ` +
+        `resolves within a few minutes on an active pool. Wait and retry.`
+      );
+    }
+    throw new Error(`repay_quote failed: ${message}`);
   }
 }
 
