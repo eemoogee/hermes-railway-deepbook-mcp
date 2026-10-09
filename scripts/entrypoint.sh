@@ -185,7 +185,7 @@ ensure_mcp_config() {
 
 mcp_servers:
   deepbook:
-    command: node
+    command: /usr/bin/node
     args:
       - /app/mcp-server/dist/index.js
     env:
@@ -219,6 +219,15 @@ content = re.sub(pattern, replacement, content)
 with open('${CONFIG_FILE}', 'w') as f:
     f.write(content)
 "
+}
+
+use_system_node_for_mcp() {
+  # A bare "node" makes Hermes download its own managed Node during MCP discovery, which times out
+  # and cancels the connection; an absolute path is used as-is
+  if grep -qE '^    command: node[[:space:]]*$' "$CONFIG_FILE" 2>/dev/null; then
+    echo "[bootstrap] Pointing MCP server command at /usr/bin/node"
+    sed -i -E 's#^    command: node[[:space:]]*$#    command: /usr/bin/node#' "$CONFIG_FILE"
+  fi
 }
 
 inject_sui_key_file() {
@@ -311,6 +320,7 @@ validate_platforms
 migrate_legacy_messaging_cwd
 ensure_model_in_config
 ensure_mcp_config
+use_system_node_for_mcp
 inject_sui_key_file
 inject_margin_manager_address
 inject_github_config
