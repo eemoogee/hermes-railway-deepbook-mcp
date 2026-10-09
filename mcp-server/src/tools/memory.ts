@@ -6,12 +6,10 @@ export type MemoryHandler = (
   state: AppState
 ) => Promise<{ content: { type: string; text: string }[] }>;
 
-// Initialize MemWal client at module load
-if (!process.env.MEMWAL_PRIVATE_KEY) {
-  throw new Error('[memory] Missing required env var: MEMWAL_PRIVATE_KEY');
-}
-if (!process.env.MEMWAL_ACCOUNT_ID) {
-  throw new Error('[memory] Missing required env var: MEMWAL_ACCOUNT_ID');
+// MemWal is optional — without credentials the memory tools are not registered
+const memwalConfigured = Boolean(process.env.MEMWAL_PRIVATE_KEY && process.env.MEMWAL_ACCOUNT_ID);
+if (!memwalConfigured) {
+  console.error('[memory] MEMWAL_PRIVATE_KEY/MEMWAL_ACCOUNT_ID not set — memory tools disabled');
 }
 
 // Declare memwal variable - actual initialization happens in async context
@@ -36,9 +34,11 @@ async function initializeMemWal(): Promise<void> {
 
 // Initialize immediately but don't block module load
 // Handlers will check if memwal is initialized
-initializeMemWal().catch(err => {
-  console.error('[memory] MemWal initialization failed:', err);
-});
+if (memwalConfigured) {
+  initializeMemWal().catch(err => {
+    console.error('[memory] MemWal initialization failed:', err);
+  });
+}
 
 // Helper to ensure memwal is initialized
 async function ensureMemWalInitialized(): Promise<any> {
@@ -220,7 +220,7 @@ async function memoryHealthHandler(
 }
 
 // Tool definitions
-export const memoryTools = [
+const memoryToolDefinitions = [
   {
     name: 'memory_write',
     description: 'Write a memory to Walrus Memory. Use this to log trade decisions, market observations, and strategy performance. text should be a distilled, factual statement — not a raw dump. namespace organises the memory by type (e.g. trades, strategies, market). Writes are append-only — avoid writing duplicate or redundant entries.',
@@ -276,6 +276,8 @@ export const memoryTools = [
     },
   },
 ];
+
+export const memoryTools = memwalConfigured ? memoryToolDefinitions : [];
 
 // Handler mapping
 export const memoryHandlers: Record<string, MemoryHandler> = {
