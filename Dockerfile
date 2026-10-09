@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 ARG HERMES_GIT_REF=main
 
@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir websockets -e "/opt/hermes-agent[messaging,cron,c
 RUN pip install --no-cache-dir 'hermes-agent[mcp]'
 
 
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
