@@ -221,6 +221,28 @@ with open('${CONFIG_FILE}', 'w') as f:
 "
 }
 
+inject_sui_key_file() {
+  # ensure_key_file unsets SUI_PRIVATE_KEY, so the MCP server must read the key from the file instead
+  local key_file="/data/.secrets/sui_private_key"
+  if [[ ! -f "$key_file" ]]; then
+    return
+  fi
+  if grep -q "SUI_KEY_FILE" "$CONFIG_FILE" 2>/dev/null; then
+    return
+  fi
+  echo "[bootstrap] Injecting SUI_KEY_FILE into MCP config"
+  python3 -c "
+import re
+with open('${CONFIG_FILE}', 'r') as f:
+    content = f.read()
+pattern = r'(      SUI_PRIVATE_KEY: [^\n]+)'
+replacement = r'\1\n      SUI_KEY_FILE: \"${key_file}\"'
+content = re.sub(pattern, replacement, content)
+with open('${CONFIG_FILE}', 'w') as f:
+    f.write(content)
+"
+}
+
 inject_github_config() {
   if [[ -z "${GITHUB_REPO:-}" ]]; then
     return
@@ -289,6 +311,7 @@ validate_platforms
 migrate_legacy_messaging_cwd
 ensure_model_in_config
 ensure_mcp_config
+inject_sui_key_file
 inject_margin_manager_address
 inject_github_config
 inject_memwal_config
