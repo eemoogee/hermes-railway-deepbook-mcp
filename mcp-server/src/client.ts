@@ -8,7 +8,7 @@ import type { ClientWithExtensions } from '@mysten/sui/client';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { config } from './config.js';
+import { config, readEnv } from './config.js';
 import * as fs from 'fs';
 
 // Type alias for the extended client with DeepBook capabilities
@@ -37,10 +37,11 @@ export async function initClient(): Promise<AppState> {
 
   // Resolve key: prefer file (production), fall back to env var (local dev)
   let rawKey: string | null = null;
+  const envKey = readEnv('SUI_PRIVATE_KEY');
   if (config.suiKeyFile) {
     rawKey = fs.readFileSync(config.suiKeyFile, 'utf8').trim();
-  } else if (process.env.SUI_PRIVATE_KEY) {
-    rawKey = process.env.SUI_PRIVATE_KEY.trim();
+  } else if (envKey) {
+    rawKey = envKey.trim();
   }
 
   if (rawKey) {

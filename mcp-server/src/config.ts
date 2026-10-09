@@ -97,6 +97,18 @@ function validateRpcUrl(envValue: string | undefined): string {
 // Internal validated configuration cache
 let validatedConfig: Config | null = null;
 
+/**
+ * Read an environment variable, treating an unexpanded "${VAR}" placeholder as unset.
+ * Hermes passes MCP config env values through literally when the referenced variable is not set.
+ */
+export function readEnv(name: string): string | undefined {
+  const value = process.env[name];
+  if (value && /^\$\{[^}]+\}$/.test(value.trim())) {
+    return undefined;
+  }
+  return value;
+}
+
 
 /**
  * Validate BALANCE_MANAGER_ADDRESS environment variable.
@@ -140,13 +152,13 @@ function getValidatedConfig(): Config {
 
   try {
     validatedConfig = {
-      network: validateNetwork(process.env.SUI_NETWORK),
-      rpcUrl: validateRpcUrl(process.env.SUI_RPC_URL),
-      allowedPools: parseAllowedPools(process.env.ALLOWED_POOLS),
-      logLevel: validateLogLevel(process.env.LOG_LEVEL),
-      suiKeyFile: parseSuiKeyFile(process.env.SUI_KEY_FILE),
-      balanceManagerAddress: validateBalanceManagerAddress(process.env.BALANCE_MANAGER_ADDRESS),
-      marginManagerAddress: process.env.MARGIN_MANAGER_ADDRESS?.trim() || null,
+      network: validateNetwork(readEnv('SUI_NETWORK')),
+      rpcUrl: validateRpcUrl(readEnv('SUI_RPC_URL')),
+      allowedPools: parseAllowedPools(readEnv('ALLOWED_POOLS')),
+      logLevel: validateLogLevel(readEnv('LOG_LEVEL')),
+      suiKeyFile: parseSuiKeyFile(readEnv('SUI_KEY_FILE')),
+      balanceManagerAddress: validateBalanceManagerAddress(readEnv('BALANCE_MANAGER_ADDRESS')),
+      marginManagerAddress: readEnv('MARGIN_MANAGER_ADDRESS')?.trim() || null,
     };
     return validatedConfig;
   } catch (error) {
