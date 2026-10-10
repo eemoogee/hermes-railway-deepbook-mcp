@@ -57,6 +57,12 @@ async function naviGetPoolHandler(
     const borrowed = amount(pool.poolBorrowAmount);
     const supplyApy = pct(pool.supplyIncentiveApyInfo?.apy);
     const borrowApy = pct(pool.borrowIncentiveApyInfo?.apy);
+    // Checked against live SUI data: supply total = vaultApr + boostedApr, borrow total = vaultApr - boostedApr
+    const supplyInterest = pct(pool.supplyIncentiveApyInfo?.vaultApr);
+    const supplyRewards = pct(pool.supplyIncentiveApyInfo?.boostedApr);
+    const borrowInterest = pct(pool.borrowIncentiveApyInfo?.vaultApr);
+    const borrowRewards = pct(pool.borrowIncentiveApyInfo?.boostedApr);
+    const supplyUnderlying = pct(pool.supplyIncentiveApyInfo?.underlyingApy);
     const ltv = amount(pool.ltvValue ?? pool.ltv);
     const liquidationThreshold = amount(pool.liquidationFactor?.threshold);
 
@@ -64,22 +70,24 @@ async function naviGetPoolHandler(
       symbol,
       coin_type: pool.suiCoinType ?? pool.coinType,
       asset_id: pool.id,
-      summary: `${symbol}: lenders earn ${supplyApy ?? '?'}% APY; borrowers pay ${borrowApy ?? '?'}% APY (both include NAVI reward incentives). `
+      summary: `${symbol}: lenders earn ${supplyApy ?? '?'}% APY (${supplyInterest ?? '?'}% interest + ${supplyRewards ?? '?'}% rewards); `
+        + `borrowers pay ${borrowApy ?? '?'}% net APY (${borrowInterest ?? '?'}% interest - ${borrowRewards ?? '?'}% rewards). `
         + `${roundedAmount(supplied)} ${symbol} supplied, ${roundedAmount(borrowed)} ${symbol} borrowed.`,
       rates_pct: {
-        supply_apy_total: supplyApy,
-        borrow_apy_total: borrowApy,
-        supply_breakdown: {
-          underlying_apy: pct(pool.supplyIncentiveApyInfo?.underlyingApy),
-          boosted_apr: pct(pool.supplyIncentiveApyInfo?.boostedApr),
-          vault_apr: pct(pool.supplyIncentiveApyInfo?.vaultApr),
+        supply: {
+          total_apy: supplyApy,
+          interest_apr: supplyInterest,
+          reward_apr: supplyRewards,
+          ...(supplyUnderlying ? { underlying_apy: supplyUnderlying } : {}),
+          reward_coins: pool.supplyIncentiveApyInfo?.rewardCoin ?? [],
         },
-        borrow_breakdown: {
-          underlying_apy: pct(pool.borrowIncentiveApyInfo?.underlyingApy),
-          boosted_apr: pct(pool.borrowIncentiveApyInfo?.boostedApr),
-          vault_apr: pct(pool.borrowIncentiveApyInfo?.vaultApr),
+        borrow: {
+          net_apy: borrowApy,
+          interest_apr: borrowInterest,
+          reward_apr: borrowRewards,
+          reward_coins: pool.borrowIncentiveApyInfo?.rewardCoin ?? [],
         },
-        note: 'Percent values as reported by NAVI. Totals include reward incentives, so the borrow total can be lower than the supply total. Breakdown fields use NAVI\'s own names.',
+        note: 'Percent per year. Lenders earn interest + rewards; borrowers pay interest minus rewards, so the net borrow APY can be lower than the supply APY. Rewards are paid in the listed reward_coins.',
       },
       pool_size: {
         total_supplied: supplied,
@@ -140,7 +148,7 @@ async function naviGetPositionHandler(
 export const naviTools = [
   {
     name: 'navi_get_pool',
-    description: 'Fetch current lending pool state for any NAVI-supported asset. Returns a plain-language summary, supply and borrow APY in percent (totals include NAVI reward incentives, so borrow can be lower than supply), pool size in whole tokens and USD, utilization, max LTV and liquidation threshold. Use this to check yield rates before depositing or to assess borrow costs.',
+    description: 'Fetch current lending pool state for any NAVI-supported asset. Returns a plain-language summary, supply APY (interest + rewards) and net borrow APY (interest - rewards) in percent with the interest/reward split, pool size in whole tokens and USD, utilization, max LTV and liquidation threshold. Use this to check yield rates before depositing or to assess borrow costs.',
     inputSchema: {
       type: 'object',
       properties: {
