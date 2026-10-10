@@ -8,29 +8,93 @@ import type { AppState } from '../client.js';
 import { executeTransaction } from '../utils/tx-executor.js';
 import { Transaction } from '@mysten/sui/transactions';
 
+// Numeric strings or numbers -> NAVI asset ID; "pkg::module::TYPE" -> coin type; anything else -> token symbol.
+async function resolveNaviPool(identifier: string): Promise<any> {
+  const { getPool, getPools } = await import('@naviprotocol/lending');
+  if (/^\d+$/.test(identifier)) {
+    return getPool(Number(identifier), { env: 'prod' });
+  }
+  if (identifier.includes('::')) {
+    return getPool(identifier, { env: 'prod' });
+  }
+  const pools = (await getPools({ env: 'prod' })) as any[];
+  const match = pools.find((p) => String(p.token?.symbol ?? '').toUpperCase() === identifier.toUpperCase());
+  if (!match) {
+    const symbols = pools.map((p) => p.token?.symbol).filter(Boolean).join(', ');
+    throw new Error(`No NAVI pool for symbol "${identifier}". Available: ${symbols}`);
+  }
+  return match;
+}
+
+// NAVI reports rates as percent strings (e.g. "1.912"); keep blanks as null rather than 0
+function pct(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? Number(n.toFixed(4)) : null;
+}
+
+function amount(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function roundedAmount(value: number | null): string {
+  return value === null ? '?' : value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
 async function naviGetPoolHandler(
   args: Record<string, unknown>,
   _state: AppState
 ): Promise<{ content: { type: string; text: string }[] }> {
   try {
-    const { getPool } = await import('@naviprotocol/lending');
-    const coin_type = args.coin_type as string;
-    if (!coin_type) throw new Error('coin_type is required.');
+    const identifier = String(args.coin_type ?? '').trim();
+    if (!identifier) throw new Error('coin_type is required.');
 
-    const pool = await getPool(coin_type, { env: 'prod' });
+    const pool = await resolveNaviPool(identifier);
+    const symbol: string = pool.token?.symbol ?? '';
+    const supplied = amount(pool.poolSupplyAmount);
+    const borrowed = amount(pool.poolBorrowAmount);
+    const supplyApy = pct(pool.supplyIncentiveApyInfo?.apy);
+    const borrowApy = pct(pool.borrowIncentiveApyInfo?.apy);
+    const ltv = amount(pool.ltvValue ?? pool.ltv);
+    const liquidationThreshold = amount(pool.liquidationFactor?.threshold);
 
     const result = {
-      coin_type: (pool as any).coinType ?? (pool as any).coin_type,
-      symbol: (pool as any).token?.symbol ?? '',
-      asset_id: (pool as any).id,
-      supply_apy: (pool as any).supplyIncentiveApyInfo?.apy ?? (pool as any).currentSupplyRate,
-      borrow_apy: (pool as any).borrowIncentiveApyInfo?.apy ?? (pool as any).currentBorrowRate,
-      total_supply: (pool as any).totalSupplyAmount,
-      total_borrow: (pool as any).borrowedAmount,
-      utilization_rate: (pool as any).utilizationRate ?? '',
-      ltv: (pool as any).ltvValue ?? (pool as any).ltv,
-      liquidation_threshold: (pool as any).liquidationFactor?.threshold ?? '',
-      is_isolated: (pool as any).isIsolated,
+      symbol,
+      coin_type: pool.suiCoinType ?? pool.coinType,
+      asset_id: pool.id,
+      summary: `${symbol}: lenders earn ${supplyApy ?? '?'}% APY; borrowers pay ${borrowApy ?? '?'}% APY (both include NAVI reward incentives). `
+        + `${roundedAmount(supplied)} ${symbol} supplied, ${roundedAmount(borrowed)} ${symbol} borrowed.`,
+      rates_pct: {
+        supply_apy_total: supplyApy,
+        borrow_apy_total: borrowApy,
+        supply_breakdown: {
+          underlying_apy: pct(pool.supplyIncentiveApyInfo?.underlyingApy),
+          boosted_apr: pct(pool.supplyIncentiveApyInfo?.boostedApr),
+          vault_apr: pct(pool.supplyIncentiveApyInfo?.vaultApr),
+        },
+        borrow_breakdown: {
+          underlying_apy: pct(pool.borrowIncentiveApyInfo?.underlyingApy),
+          boosted_apr: pct(pool.borrowIncentiveApyInfo?.boostedApr),
+          vault_apr: pct(pool.borrowIncentiveApyInfo?.vaultApr),
+        },
+        note: 'Percent values as reported by NAVI. Totals include reward incentives, so the borrow total can be lower than the supply total. Breakdown fields use NAVI\'s own names.',
+      },
+      pool_size: {
+        total_supplied: supplied,
+        total_borrowed: borrowed,
+        unit: symbol,
+        total_supplied_usd: amount(pool.poolSupplyValue),
+        total_borrowed_usd: amount(pool.poolBorrowValue),
+        utilization_pct: supplied && borrowed !== null ? Number(((borrowed / supplied) * 100).toFixed(2)) : null,
+        oracle_price_usd: amount(pool.oracle?.price),
+      },
+      risk: {
+        max_ltv_pct: ltv === null ? null : Number((ltv * 100).toFixed(2)),
+        liquidation_threshold_pct: liquidationThreshold === null ? null : Number((liquidationThreshold * 100).toFixed(2)),
+        is_isolated: pool.isIsolated,
+      },
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
@@ -76,13 +140,13 @@ async function naviGetPositionHandler(
 export const naviTools = [
   {
     name: 'navi_get_pool',
-    description: 'Fetch current lending pool state for any NAVI-supported asset. Returns supply APY, borrow APY, utilization rate, LTV, and liquidation threshold. Use this to check yield rates before depositing or to assess borrow costs.',
+    description: 'Fetch current lending pool state for any NAVI-supported asset. Returns a plain-language summary, supply and borrow APY in percent (totals include NAVI reward incentives, so borrow can be lower than supply), pool size in whole tokens and USD, utilization, max LTV and liquidation threshold. Use this to check yield rates before depositing or to assess borrow costs.',
     inputSchema: {
       type: 'object',
       properties: {
         coin_type: {
           type: 'string',
-          description: 'Coin type string (e.g. "0x2::sui::SUI") or numeric asset ID (e.g. "0" for SUI).',
+          description: 'Token symbol (e.g. "SUI", "USDC"), coin type (e.g. "0x2::sui::SUI"), or numeric NAVI asset ID (e.g. "0" for SUI).',
         },
       },
       required: ['coin_type'],
