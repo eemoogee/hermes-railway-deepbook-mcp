@@ -185,7 +185,7 @@ ensure_mcp_config() {
 
 mcp_servers:
   deepbook:
-    command: node
+    command: /usr/bin/node
     args:
       - /app/mcp-server/dist/index.js
     env:
@@ -219,6 +219,44 @@ content = re.sub(pattern, replacement, content)
 with open('${CONFIG_FILE}', 'w') as f:
     f.write(content)
 "
+}
+
+disable_tool_search() {
+  # Hermes' tool search hides MCP tools behind search/describe/call bridge tools by default; some
+  # models (e.g. deepseek-chat) then fake tool calls as text instead of calling the DeepBook tools.
+  # Respect an explicit tool_search setting if one is already there.
+  if grep -qE '^  tool_search:' "$CONFIG_FILE" 2>/dev/null; then
+    return 0
+  fi
+
+  echo "[bootstrap] Disabling Hermes tool search so MCP tools are passed to the model directly"
+  if grep -qE '^tools:[[:space:]]*$' "$CONFIG_FILE" 2>/dev/null; then
+    local tmp_file
+    tmp_file="$(mktemp)"
+    awk '
+      /^tools:[[:space:]]*$/ && !inserted {
+        print
+        print "  tool_search:"
+        print "    enabled: \"off\""
+        inserted = 1
+        next
+      }
+      { print }
+    ' "$CONFIG_FILE" > "$tmp_file"
+    mv "$tmp_file" "$CONFIG_FILE"
+    return 0
+  fi
+
+  printf '\ntools:\n  tool_search:\n    enabled: "off"\n' >> "$CONFIG_FILE"
+}
+
+use_system_node_for_mcp() {
+  # A bare "node" makes Hermes download its own managed Node during MCP discovery, which times out
+  # and cancels the connection; an absolute path is used as-is
+  if grep -qE '^    command: node[[:space:]]*$' "$CONFIG_FILE" 2>/dev/null; then
+    echo "[bootstrap] Pointing MCP server command at /usr/bin/node"
+    sed -i -E 's#^    command: node[[:space:]]*$#    command: /usr/bin/node#' "$CONFIG_FILE"
+  fi
 }
 
 inject_sui_key_file() {
@@ -311,6 +349,8 @@ validate_platforms
 migrate_legacy_messaging_cwd
 ensure_model_in_config
 ensure_mcp_config
+use_system_node_for_mcp
+disable_tool_search
 inject_sui_key_file
 inject_margin_manager_address
 inject_github_config
