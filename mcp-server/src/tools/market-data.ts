@@ -243,14 +243,27 @@ async function getPoolDeepPriceHandler(
     const deepPrice = await client.deepbook.getPoolDeepPrice(pool);
 
     const deepPriceAny = deepPrice as any;
-    const deepPerAsset = deepPriceAny.deep_per_base !== undefined
+    const deepPerAsset: number = deepPriceAny.deep_per_base !== undefined
       ? deepPriceAny.deep_per_base
       : deepPriceAny.deep_per_quote;
 
+    // Pool keys are BASE_QUOTE, so name the asset the rate is measured against
+    const [baseCoin, quoteCoin] = pool.split('_');
+    const asset = deepPriceAny.asset_is_base ? baseCoin : quoteCoin;
+    const assetPerDeep = deepPerAsset > 0 ? 1 / deepPerAsset : null;
+    const fmt = (n: number) => Number(n.toPrecision(6));
+
+    // Spell out both directions so the rate can't be read upside down
     const result = {
       pool,
-      deep_per_asset: deepPerAsset,
+      asset,
       asset_is_base: deepPriceAny.asset_is_base,
+      deep_per_asset: deepPerAsset,
+      asset_per_deep: assetPerDeep === null ? null : fmt(assetPerDeep),
+      summary: assetPerDeep === null
+        ? `DEEP conversion rate unavailable for ${pool}`
+        : `1 ${asset} = ${fmt(deepPerAsset)} DEEP; 1 DEEP = ${fmt(assetPerDeep)} ${asset}`,
+      note: 'Pool DEEP conversion rate used to calculate trading fees paid in DEEP, not a live DEEP market price.',
     };
 
     return {
@@ -390,7 +403,7 @@ export const marketDataTools = [
   },
   {
     name: 'get_pool_deep_price',
-    description: 'Get the DEEP token price conversion rate for a pool.',
+    description: 'Get the pool\'s DEEP conversion rate (used for fees paid in DEEP). Returns both directions: deep_per_asset (DEEP per 1 unit of asset) and asset_per_deep (asset per 1 DEEP), plus a plain-language summary. Not a live DEEP market price.',
     inputSchema: {
       type: 'object',
       properties: {
