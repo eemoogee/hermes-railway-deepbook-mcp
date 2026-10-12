@@ -1,4 +1,10 @@
 import type { AppState } from '../client.js';
+import { readEnv } from '../config.js';
+
+/** GitHub repo holding the Muneo reports, e.g. sm33f3r/muneo. GITHUB_REPO is the older name for MUNEO_REPO. */
+function muneoRepo(): string | undefined {
+  return readEnv('MUNEO_REPO')?.trim() || readEnv('GITHUB_REPO')?.trim() || undefined;
+}
 
 // Common handler signature for all muneo tools
 export type MuneoHandler = (
@@ -24,21 +30,21 @@ async function muneoListReportsHandler(
     };
   }
 
-  const GITHUB_REPO = process.env.GITHUB_REPO;
+  const MUNEO_REPO = muneoRepo();
   const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
-  if (!GITHUB_REPO) {
+  if (!MUNEO_REPO) {
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          error: 'GITHUB_REPO environment variable is required'
+          error: 'MUNEO_REPO environment variable is required (the GitHub repo holding the Muneo reports, e.g. sm33f3r/muneo)'
         }, null, 2)
       }]
     };
   }
 
-  const url = `https://api.github.com/repos/${GITHUB_REPO}/contents/${encodeURIComponent(path)}`;
+  const url = `https://api.github.com/repos/${MUNEO_REPO}/contents/${encodeURIComponent(path)}`;
 
   // GITHUB_TOKEN is optional — the Muneo repo (sm33f3r/muneo) is public as of Sep 2026; auth is only used to raise the GitHub API rate limit from 60/hr to 5000/hr, not for access.
   const listHeaders: Record<string, string> = {
