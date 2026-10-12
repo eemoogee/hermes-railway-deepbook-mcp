@@ -12,6 +12,19 @@ export type MuneoHandler = (
   state: AppState
 ) => Promise<{ content: { type: string; text: string }[] }>;
 
+const DEFAULT_LIST_LIMIT = 10;
+const MAX_LIST_LIMIT = 100;
+
+/**
+ * Daily report names end in _YYYYMMDD_HHMMSS, so sorting by that suffix puts the
+ * newest first across tokens (plain name order would list every SUI report before any SOL one).
+ * Rollups (weekly_2026_W39.json, monthly_2026_M09.json) already sort by name.
+ */
+function sortKey(name: string): string {
+  const stamp = /(\d{8}_\d{6})\.json$/.exec(name);
+  return stamp ? `${stamp[1]} ${name}` : name;
+}
+
 // Tool 1: muneo_list_reports
 async function muneoListReportsHandler(
   args: Record<string, unknown>,
@@ -73,18 +86,31 @@ async function muneoListReportsHandler(
     }
 
     const files = await response.json();
+    if (!Array.isArray(files)) {
+      return { content: [{ type: 'text', text: JSON.stringify({ error: `${path} is a file, not a directory` }, null, 2) }] };
+    }
 
-    // Sort files alphabetically descending
-    const sortedFiles = Array.isArray(files)
-      ? files.sort((a: any, b: any) => b.name.localeCompare(a.name))
-      : files;
+    // The reports directory holds hundreds of files; the full GitHub listing is too large to hand to the model
+    const filter = typeof args.filter === 'string' ? args.filter.trim().toLowerCase() : '';
+    const limit = Math.min(Math.max(Math.floor(Number(args.limit) || DEFAULT_LIST_LIMIT), 1), MAX_LIST_LIMIT);
+    const matching = files
+      .filter((f: any) => !filter || String(f.name).toLowerCase().includes(filter))
+      .sort((a: any, b: any) => sortKey(b.name).localeCompare(sortKey(a.name)));
 
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
           path,
-          files: sortedFiles
+          filter: filter || null,
+          total_matching: matching.length,
+          showing: Math.min(limit, matching.length),
+          order: 'newest first',
+          files: matching.slice(0, limit).map((f: any) => ({
+            name: f.name,
+            type: f.type,
+            download_url: f.download_url,
+          })),
         }, null, 2)
       }]
     };
@@ -169,13 +195,21 @@ async function muneoFetchReportHandler(
 export const muneoTools = [
   {
     name: 'muneo_list_reports',
-    description: 'List the contents of a directory in the Muneo market intelligence repository. Returns an array of file objects including name, download_url, and sha. Use this to discover available reports before fetching. Common paths: \'reports\' (daily SUI and global), \'context/sui/accumulated/weekly\', \'context/sui/accumulated/monthly\', \'context/sui/accumulated/quarterly\', \'context/global/accumulated/weekly\', \'context/global/accumulated/monthly\', \'context/global/accumulated/quarterly\'. Sort returned filenames alphabetically descending to find the latest — filenames are designed to sort correctly.',
+    description: 'List files in a directory of the Muneo market intelligence repository, newest first. Returns name and download_url for the newest `limit` files (default 10) plus the total count. Use `filter` to narrow by name, e.g. \'global\', \'sui\' or \'sol\'. Common paths: \'reports\' (daily global, SUI and SOL reports, named market_report_<scope>_<YYYYMMDD>_<HHMMSS>.json), \'context/<sui|sol|global>/accumulated/weekly\', \'.../monthly\', \'.../quarterly\'. Pass a download_url to muneo_fetch_report to read a report.',
     inputSchema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
           description: 'Directory path within the repo, e.g. reports, context/sui/accumulated/weekly, context/global/accumulated/monthly',
+        },
+        filter: {
+          type: 'string',
+          description: 'Only include files whose name contains this text (case-insensitive), e.g. global, sui, sol, 20261011',
+        },
+        limit: {
+          type: 'number',
+          description: `How many of the newest files to return. Default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}.`,
         },
       },
       required: ['path'],
