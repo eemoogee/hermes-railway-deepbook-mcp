@@ -6,6 +6,7 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { executeTransaction } from '../utils/tx-executor.js';
 import { config, isPoolAllowed } from '../config.js';
+import { requirePositiveNumber, requireOneOf } from '../utils/validate.js';
 import type { AppState } from '../client.js';
 
 // Common handler signature for all account tools
@@ -276,7 +277,9 @@ async function getWalletBalanceHandler(
       DEEP: '0xdeeb7a4662eec9f2f3def03fb937a663dddaa2e215b8078a284d026b7946c270::deep::DEEP',
     };
 
-    const balances: { coin: string; coinType: string; balance: string }[] = [];
+    // On-chain balances are integers in the coin's smallest unit (1 SUI = 10^9, 1 USDC/DEEP = 10^6)
+    const DECIMALS: Record<string, number> = { SUI: 9, USDC: 6, DEEP: 6 };
+    const balances: { coin: string; coinType: string; balance: number; balance_raw: string }[] = [];
 
     for (const [coinKey, coinType] of Object.entries(COIN_TYPES)) {
       const suiClient = client as any;
@@ -288,7 +291,8 @@ async function getWalletBalanceHandler(
       balances.push({
         coin: coinKey,
         coinType,
-        balance: rawBalance,
+        balance: Number(rawBalance) / 10 ** DECIMALS[coinKey],
+        balance_raw: rawBalance,
       });
     }
 
@@ -318,16 +322,8 @@ async function withdrawFromBalanceManagerHandler(
   try {
     await performWithdrawalChecks(state);
 
-    const coin_type = args.coin_type as string;
-    const amount = args.amount as number;
-
-    if (!['SUI', 'USDC', 'DEEP'].includes(coin_type)) {
-      throw new Error(`coin_type must be one of: SUI, USDC, DEEP. Got: ${coin_type}`);
-    }
-
-    if (!amount || amount <= 0) {
-      throw new Error(`amount must be a positive number. Got: ${amount}`);
-    }
+    const coin_type = requireOneOf('coin_type', args.coin_type, ['SUI', 'USDC', 'DEEP'] as const);
+    const amount = requirePositiveNumber('amount', args.amount);
 
     const address = state.keypair!.toSuiAddress();
     const tx = new Transaction();
@@ -372,11 +368,7 @@ async function withdrawAllFromBalanceManagerHandler(
   try {
     await performWithdrawalChecks(state);
 
-    const coin_type = args.coin_type as string;
-
-    if (!['SUI', 'USDC', 'DEEP'].includes(coin_type)) {
-      throw new Error(`coin_type must be one of: SUI, USDC, DEEP. Got: ${coin_type}`);
-    }
+    const coin_type = requireOneOf('coin_type', args.coin_type, ['SUI', 'USDC', 'DEEP'] as const);
 
     const address = state.keypair!.toSuiAddress();
     const tx = new Transaction();
@@ -482,7 +474,7 @@ export const accountTools = [
   },
   {
     name: 'get_wallet_balance',
-    description: 'Get SUI, USDC, and DEEP balances from the raw wallet address (on-chain, not BalanceManager). Returns the total balance for each coin type owned by the wallet.',
+    description: 'Get SUI, USDC, and DEEP balances from the raw wallet address (on-chain, not BalanceManager). Returns the total balance for each coin type owned by the wallet: balance is in whole coins, balance_raw in the coin\'s smallest on-chain unit.',
     inputSchema: {
       type: 'object',
       properties: {},

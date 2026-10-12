@@ -1,6 +1,7 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { executeTransaction } from '../utils/tx-executor.js';
 import { config } from '../config.js';
+import { requirePositiveNumber, requireBoolean, optionalBoolean, requireOneOf, requireOrderId } from '../utils/validate.js';
 import type { AppState } from '../client.js';
 
 // Handler signature
@@ -34,25 +35,20 @@ async function addConditionalOrderHandler(
     requireSigningKey(state, 'add_conditional_order');
 
     // Extract and validate required parameters
-    const trigger_price = args.trigger_price as number;
-    const trigger_below = args.trigger_below as boolean;
-    const order_type = args.order_type as string;
-    const quantity = args.quantity as number;
-    const is_bid = args.is_bid as boolean;
+    const trigger_price = requirePositiveNumber('trigger_price', args.trigger_price);
+    const trigger_below = requireBoolean('trigger_below', args.trigger_below);
+    const order_type = requireOneOf('order_type', args.order_type, ['limit', 'market'] as const);
+    const quantity = requirePositiveNumber('quantity', args.quantity);
+    const is_bid = requireBoolean('is_bid', args.is_bid);
 
     // Extract optional parameters with defaults
-    const price = args.price as number | undefined;
-    const pay_with_deep = args.pay_with_deep !== undefined ? (args.pay_with_deep as boolean) : true;
-
-    // Validate order_type
-    if (order_type !== 'limit' && order_type !== 'market') {
-      throw new Error(`Invalid order_type: '${order_type}'. Must be 'limit' or 'market'.`);
-    }
+    const pay_with_deep = optionalBoolean('pay_with_deep', args.pay_with_deep, true);
 
     // Validate price for limit orders
-    if (order_type === 'limit' && price === undefined) {
+    if (order_type === 'limit' && (args.price === undefined || args.price === null)) {
       throw new Error('price is required for limit orders');
     }
+    const price = order_type === 'limit' ? requirePositiveNumber('price', args.price) : undefined;
 
     // Generate IDs
     const conditionalOrderId = Date.now();
@@ -127,7 +123,7 @@ async function cancelConditionalOrderHandler(
     requireSigningKey(state, 'cancel_conditional_order');
 
     // Extract parameters
-    const conditional_order_id = args.conditional_order_id as number;
+    const conditional_order_id = requireOrderId('conditional_order_id', args.conditional_order_id);
 
     // Build transaction
     const tx = new Transaction();

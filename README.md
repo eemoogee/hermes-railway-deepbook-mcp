@@ -69,7 +69,7 @@ npm run build
 npm start
 ```
 
-There's no test suite — TypeScript's strict mode is the primary correctness check (`npm run build` will fail on type errors).
+`npm test` builds the server and runs the offline safety tests in `mcp-server/test/` (input validation, slippage guards, dry runs, flash-loan profit floor). They use a fake Sui client, so no network or key is needed. TypeScript's strict mode (`npm run build`) catches type errors.
 
 To smoke-test the full container (Hermes + MCP server) locally:
 
@@ -98,8 +98,20 @@ Set these as Railway (or local) environment variables:
 | `SUI_KEY_FILE` | — | path to a key file, if you're supplying one directly |
 | `BALANCE_MANAGER_ADDRESS` | — | required for account, order, and conditional-order tools |
 | `MARGIN_MANAGER_ADDRESS` | — | required for margin account tools |
+| `MAX_SLIPPAGE_PCT` | `1` | max % a market order may fill worse than the mid price, and the default slippage for swaps without a minimum (0–50) |
 
 Leave `SUI_PRIVATE_KEY` unset to run in read-only mode — market data and indicators still work, nothing can be traded.
+
+Hermes passes only the variables listed in the `deepbook:` `env:` block of `config.yaml` to the MCP server, so to change `MAX_SLIPPAGE_PCT` add it there (e.g. `MAX_SLIPPAGE_PCT: "0.5"`), not just to `.env`.
+
+**Trading safeguards** (enforced in the server, whatever the model asks):
+
+- Every trading tool only accepts pools in `ALLOWED_POOLS`, and rejects zero, negative or non-numeric amounts and prices.
+- `true`/`false` arguments (buy vs sell, trigger direction) are strict: the string `"false"` is never read as true.
+- Market orders are refused if the order book would fill them more than `MAX_SLIPPAGE_PCT` from the mid price; swaps without a minimum get one from a live quote minus `MAX_SLIPPAGE_PCT`.
+- `place_limit_order`, `place_market_order` and both swaps accept `dry_run: true`, which simulates the transaction and returns the wallet's balance changes without sending it.
+- `execute_flash_loan`'s `min_profit` is enforced on-chain; Cetus liquidity removal uses the given `slippage` for its minimum amounts.
+- Withdrawals only ever pay the wallet's own address.
 
 ## Railway deploy instructions
 
