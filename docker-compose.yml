@@ -3,7 +3,10 @@ services:
     build:
       context: .
       args:
-        HERMES_GIT_REF: v2026.9.7
+        # main is what DulciFata has been running. Hermes release tags (e.g. v2026.9.24) need
+        # PYTHON_VERSION: "3.13" as well, since they don't support Python 3.14 yet.
+        HERMES_GIT_REF: main
+        PYTHON_VERSION: "3.14"
     container_name: dulcibella
     restart: unless-stopped
     env_file: .env

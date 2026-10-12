@@ -281,20 +281,41 @@ with open('${CONFIG_FILE}', 'w') as f:
 "
 }
 
-inject_github_config() {
-  if [[ -z "${GITHUB_REPO:-}" ]]; then
+inject_muneo_config() {
+  # MUNEO_REPO is the GitHub repo the Muneo tools read reports from; GITHUB_REPO is its older name
+  local repo="${MUNEO_REPO:-${GITHUB_REPO:-}}"
+  if grep -qE '^[[:space:]]+GITHUB_REPO:' "$CONFIG_FILE" 2>/dev/null; then
+    echo "[bootstrap] Renaming GITHUB_REPO to MUNEO_REPO in MCP config"
+    # A \${GITHUB_REPO} placeholder would stop resolving once .env uses MUNEO_REPO, so write the value instead
+    REPO="$repo" python3 -c "
+import os, re
+path = '${CONFIG_FILE}'
+repo = os.environ['REPO']
+with open(path, 'r') as f:
+    content = f.read()
+def rename(m):
+    value = m.group(2)
+    if repo and re.fullmatch(r'[\"\']?\\$\{[^}]+\}[\"\']?', value.strip()):
+        value = '\"' + repo + '\"'
+    return m.group(1) + 'MUNEO_REPO: ' + value
+content = re.sub(r'(?m)^([ \t]+)GITHUB_REPO:[ \t]*(.*)$', rename, content)
+with open(path, 'w') as f:
+    f.write(content)
+"
+  fi
+  if [[ -z "$repo" ]]; then
     return
   fi
-  if grep -q "GITHUB_REPO" "$CONFIG_FILE" 2>/dev/null; then
+  if grep -q "MUNEO_REPO" "$CONFIG_FILE" 2>/dev/null; then
     return
   fi
-  echo "[bootstrap] Injecting GITHUB_REPO into MCP config"
+  echo "[bootstrap] Injecting MUNEO_REPO into MCP config"
   python3 -c "
 import re
 with open('${CONFIG_FILE}', 'r') as f:
     content = f.read()
 pattern = r'(      BALANCE_MANAGER_ADDRESS: [^\n]+)'
-replacement = r'\1\n      GITHUB_REPO: \"${GITHUB_REPO}\"'
+replacement = r'\1\n      MUNEO_REPO: \"${repo}\"'
 content = re.sub(pattern, replacement, content)
 with open('${CONFIG_FILE}', 'w') as f:
     f.write(content)
@@ -353,7 +374,7 @@ use_system_node_for_mcp
 disable_tool_search
 inject_sui_key_file
 inject_margin_manager_address
-inject_github_config
+inject_muneo_config
 inject_memwal_config
 
 echo "[bootstrap] Building MCP server..."

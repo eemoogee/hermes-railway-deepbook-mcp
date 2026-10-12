@@ -98,6 +98,8 @@ Set these as Railway (or local) environment variables:
 | `SUI_KEY_FILE` | — | path to a key file, if you're supplying one directly |
 | `BALANCE_MANAGER_ADDRESS` | — | required for account, order, and conditional-order tools |
 | `MARGIN_MANAGER_ADDRESS` | — | required for margin account tools |
+| `MUNEO_REPO` | — | GitHub repo the Muneo tools read reports from, e.g. `sm33f3r/muneo` (older name: `GITHUB_REPO`, still accepted) |
+| `GITHUB_TOKEN` | — | optional; raises the GitHub API limit for the Muneo tools from 60 to 5,000 requests/hour |
 | `MAX_SLIPPAGE_PCT` | `1` | max % a market order may fill worse than the mid price, and the default slippage for swaps without a minimum (0–50) |
 
 Leave `SUI_PRIVATE_KEY` unset to run in read-only mode — market data and indicators still work, nothing can be traded.
