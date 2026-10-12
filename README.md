@@ -92,7 +92,7 @@ Set these as Railway (or local) environment variables:
 |---|---|---|
 | `SUI_NETWORK` | `mainnet` | `mainnet` or `testnet` |
 | `SUI_RPC_URL` | fullnode.mainnet.sui.io | Sui gRPC endpoint |
-| `ALLOWED_POOLS` | `SUI_USDC,DEEP_USDC` | comma-separated pool allowlist |
+| `ALLOWED_POOLS` | `SUI_USDC,DEEP_USDC` | comma-separated pool allowlist; DeepBook also has e.g. `SUI_USDSUI` and `USDSUI_USDC` |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `SUI_PRIVATE_KEY` | — | signing key; entrypoint writes it to a file and clears it from the env |
 | `SUI_KEY_FILE` | — | path to a key file, if you're supplying one directly |

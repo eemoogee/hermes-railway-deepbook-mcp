@@ -12,6 +12,7 @@ import {
   requireOneOf, requireOrderId, maxSlippagePct,
 } from '../utils/validate.js';
 import { checkMarketOrderSlippage } from '../utils/slippage.js';
+import { SUPPORTED_COINS, networkCoins, requireNetworkCoin } from '../utils/coins.js';
 import type { AppState } from '../client.js';
 
 // Handler signature
@@ -351,7 +352,7 @@ async function depositHandler(
   try {
     await performPrerequisiteChecks(state);
 
-    const coinKey = requireOneOf('coin_key', args.coin_key, ['SUI', 'USDC', 'DEEP'] as const);
+    const coinKey = requireNetworkCoin('coin_key', args.coin_key);
     const amount = requirePositiveNumber('amount', args.amount);
 
     const tx = new Transaction();
@@ -389,30 +390,22 @@ async function depositAllHandler(
 
     const { client, keypair } = state;
 
-    const coinKey = requireOneOf('coin_key', args.coin_key, ['SUI', 'USDC', 'DEEP'] as const);
+    const coinKey = requireNetworkCoin('coin_key', args.coin_key);
 
-    const COIN_TYPES: Record<string, string> = {
-      SUI: '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI',
-      USDC: '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC',
-      DEEP: '0xdeeb7a4662eec9f2f3def03fb937a663dddaa2e215b8078a284d026b7946c270::deep::DEEP',
-    };
+    const coin = networkCoins().find((c) => c.key === coinKey)!;
 
     const address = keypair!.toSuiAddress();
     const suiClient = client as any;
     const balanceResp = await suiClient.getBalance({
       owner: address,
-      coinType: COIN_TYPES[coinKey],
+      coinType: coin.type,
     });
     const rawBalance = balanceResp?.balance?.balance ?? '0';
     const balanceNum = parseFloat(rawBalance);
 
-    let amountToDeposit: number;
-    if (coinKey === 'SUI') {
-      const gasReserve = 500_000_000;
-      amountToDeposit = Math.max(0, Math.floor((balanceNum - gasReserve) / 1_000_000_000));
-    } else {
-      amountToDeposit = Math.floor(balanceNum / 1_000_000);
-    }
+    // Whole coins only; for SUI, 0.5 SUI stays in the wallet for gas
+    const gasReserve = coinKey === 'SUI' ? 500_000_000 : 0;
+    const amountToDeposit = Math.max(0, Math.floor((balanceNum - gasReserve) / coin.scalar));
 
     if (amountToDeposit <= 0) {
       return {
@@ -599,14 +592,14 @@ export const orderTools = [
   },
   {
     name: 'deposit',
-    description: 'Deposit SUI, USDC, or DEEP from the wallet into the BalanceManager so it can be used for trading.',
+    description: 'Deposit SUI, USDC, DEEP or USDSUI from the wallet into the BalanceManager so it can be used for trading.',
     inputSchema: {
       type: 'object',
       properties: {
         coin_key: {
           type: 'string',
-          description: 'Coin key to deposit — one of SUI, USDC, DEEP',
-          enum: ['SUI', 'USDC', 'DEEP'],
+          description: 'Coin key to deposit — one of SUI, USDC, DEEP, USDSUI',
+          enum: [...SUPPORTED_COINS],
         },
         amount: {
           type: 'number',
@@ -624,8 +617,8 @@ export const orderTools = [
       properties: {
         coin_key: {
           type: 'string',
-          description: 'Coin key to deposit — one of SUI, USDC, DEEP',
-          enum: ['SUI', 'USDC', 'DEEP'],
+          description: 'Coin key to deposit — one of SUI, USDC, DEEP, USDSUI',
+          enum: [...SUPPORTED_COINS],
         },
       },
       required: ['coin_key'],

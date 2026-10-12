@@ -244,6 +244,35 @@ test('get_wallet_balance reports whole coins next to raw units', async () => {
   assert.equal(usdc.balance, 7);
 });
 
+test('get_wallet_balance includes USDSUI with its mainnet type and 6 decimals', async () => {
+  const { state } = makeState();
+  const res = text(await accountHandlers.get_wallet_balance({}, state));
+  assert.deepEqual(res.balances.map((b) => b.coin), ['SUI', 'USDC', 'DEEP', 'USDSUI']);
+  const usdsui = res.balances.find((b) => b.coin === 'USDSUI');
+  assert.equal(usdsui.coinType, '0x44f838219cf67b058f3b37907b655f226153c18e33dfcd0da559a844fea9b1c1::usdsui::USDSUI');
+  assert.equal(usdsui.balance, 7.49301);
+  assert.equal(usdsui.balance_raw, '7493010');
+});
+
+test('USDSUI can be deposited and withdrawn; unknown coins cannot', async () => {
+  const { state, calls } = makeState();
+  await orderHandlers.deposit({ coin_key: 'USDSUI', amount: 5 }, state);
+  assert.deepEqual(sdkCall(calls, 'depositIntoManager').args, ['MANAGER_1', 'USDSUI', 5]);
+  await accountHandlers.withdraw_from_balance_manager({ coin_type: 'USDSUI', amount: 2 }, state);
+  assert.deepEqual(sdkCall(calls, 'withdrawFromManager').args.slice(0, 3), ['MANAGER_1', 'USDSUI', 2]);
+  await assert.rejects(accountHandlers.withdraw_from_balance_manager({ coin_type: 'WAL', amount: 1 }, state), /coin_type must be one of SUI, USDC, DEEP, USDSUI/);
+});
+
+test('deposit_all deposits whole coins, keeping 0.5 SUI for gas', async () => {
+  const usdsui = makeState();
+  text(await orderHandlers.deposit_all({ coin_key: 'USDSUI' }, usdsui.state));
+  assert.deepEqual(sdkCall(usdsui.calls, 'depositIntoManager').args, ['MANAGER_1', 'USDSUI', 7]);
+  const sui = makeState();
+  text(await orderHandlers.deposit_all({ coin_key: 'SUI' }, sui.state));
+  // 2.5 SUI held, 0.5 reserved, 2 deposited
+  assert.deepEqual(sdkCall(sui.calls, 'depositIntoManager').args, ['MANAGER_1', 'SUI', 2]);
+});
+
 test('withdraw_from_balance_manager validates amount and pays only the own wallet', async () => {
   const { state, calls } = makeState();
   await assert.rejects(accountHandlers.withdraw_from_balance_manager({ coin_type: 'SUI', amount: -5 }, state), /positive number/);

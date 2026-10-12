@@ -83,7 +83,10 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
     deepbook,
     core,
     getBalance: async ({ coinType }) => ({
-      balance: { coinType, balance: coinType.endsWith('::sui::SUI') ? '2500000000' : '7000000' },
+      balance: {
+        coinType,
+        balance: coinType.endsWith('::sui::SUI') ? '2500000000' : coinType.endsWith('::usdsui::USDSUI') ? '7493010' : '7000000',
+      },
     }),
   };
   return { state: { client, keypair }, calls };
