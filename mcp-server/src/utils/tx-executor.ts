@@ -1,5 +1,6 @@
 /**
- * Utility to sign and submit Sui Programmable Transaction Blocks (PTBs).
+ * Utility to sign and submit Sui Programmable Transaction Blocks (PTBs),
+ * or simulate them without signing (dry run).
  * Formats results for MCP tool responses.
  */
 
@@ -29,32 +30,53 @@ export async function executeTransaction(
     include: { effects: true },
   });
 
-  // VERIFY: check whether result.$kind exists on the TypeScript type.
-  // Inspection shows that result.$kind does NOT exist on the TypeScript type
-  // (causes compilation error). Therefore, we use Option B.
-  //
-  // Option A (if $kind is on the type): NOT USED - compilation error
-  //   if (result.$kind === 'FailedTransaction') { ... }
-  //
-  // Option B (if $kind is not on the type): USED - compiles cleanly
-  //   if (!result.Transaction?.status?.success) { ... }
-
-  // Remove the temporary debug log once the result shape is confirmed.
-  process.stderr.write(
-    `[tx-executor] DEBUG result shape: ${JSON.stringify(result)}\n`
-  );
-
-  const digest = result.Transaction?.digest ?? 'unknown';
-  const success = result.Transaction?.status?.success ?? false;
-
-  if (!success) {
-    throw new Error(
-      `Transaction failed. Digest: ${digest}`
-    );
+  // A transaction that executed but aborted on-chain comes back as FailedTransaction (gas is still spent)
+  const executed = result.Transaction ?? result.FailedTransaction;
+  const digest = executed?.digest ?? 'unknown';
+  if (!result.Transaction?.status?.success) {
+    const status = executed?.status as { error?: unknown } | undefined;
+    const reason = status?.error ? ` Reason: ${JSON.stringify(status.error)}` : '';
+    throw new Error(`Transaction failed. Digest: ${digest}.${reason}`);
   }
 
   return {
     tx_digest: digest,
     status: 'success',
+  };
+}
+
+export interface SimulationResult {
+  would_succeed: boolean;
+  error: unknown;
+  /** Net balance change per coin type for this wallet, in raw on-chain units (negative = leaves the wallet) */
+  balance_changes: { coin_type: string; amount_raw: string }[];
+  gas_used: unknown;
+}
+
+/**
+ * Simulate a transaction as this wallet without signing or submitting it.
+ * Nothing moves on-chain; used for dry_run previews.
+ */
+export async function simulateTransaction(tx: Transaction, state: AppState): Promise<SimulationResult> {
+  if (!state.keypair) {
+    throw new Error('Cannot simulate: MCP server is in read-only mode. SUI_PRIVATE_KEY is not configured.');
+  }
+  const address = state.keypair.toSuiAddress();
+  tx.setSenderIfNotSet(address);
+
+  const result = await state.client.core.simulateTransaction({
+    transaction: tx,
+    include: { effects: true, balanceChanges: true },
+  });
+  const executed = result.Transaction ?? result.FailedTransaction;
+  const status = executed?.status as { success?: boolean; error?: unknown } | undefined;
+
+  return {
+    would_succeed: Boolean(result.Transaction?.status?.success),
+    error: status?.error ?? null,
+    balance_changes: (executed?.balanceChanges ?? [])
+      .filter((c) => c.address === address)
+      .map((c) => ({ coin_type: c.coinType, amount_raw: c.amount })),
+    gas_used: executed?.effects?.gasUsed ?? null,
   };
 }

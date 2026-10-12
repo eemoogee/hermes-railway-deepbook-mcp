@@ -5,8 +5,13 @@
 
 import { Transaction } from '@mysten/sui/transactions';
 import { OrderType } from '@mysten/deepbook-v3';
-import { executeTransaction } from '../utils/tx-executor.js';
+import { executeTransaction, simulateTransaction } from '../utils/tx-executor.js';
 import { config } from '../config.js';
+import {
+  requireAllowedPool, requirePositiveNumber, requireBoolean, optionalBoolean,
+  requireOneOf, requireOrderId, maxSlippagePct,
+} from '../utils/validate.js';
+import { checkMarketOrderSlippage } from '../utils/slippage.js';
 import type { AppState } from '../client.js';
 
 // Handler signature
@@ -49,15 +54,18 @@ async function placeLimitOrderHandler(
     await performPrerequisiteChecks(state);
 
     // Extract and validate required parameters
-    const pool = args.pool as string;
-    const price = parseFloat(args.price as string);
-    const quantity = parseFloat(args.quantity as string);
-    const is_bid = args.is_bid as boolean;
+    const pool = requireAllowedPool(args.pool);
+    const price = requirePositiveNumber('price', args.price);
+    const quantity = requirePositiveNumber('quantity', args.quantity);
+    const is_bid = requireBoolean('is_bid', args.is_bid);
     const client_order_id = Date.now();
 
     // Extract optional parameters with defaults
-    const order_type = (args.order_type as string) || 'NO_RESTRICTION';
-    const pay_with_deep = args.pay_with_deep !== undefined ? (args.pay_with_deep as boolean) : true;
+    const order_type = args.order_type === undefined || args.order_type === null
+      ? 'NO_RESTRICTION'
+      : requireOneOf('order_type', args.order_type, Object.keys(ORDER_TYPE_MAP));
+    const pay_with_deep = optionalBoolean('pay_with_deep', args.pay_with_deep, true);
+    const dry_run = optionalBoolean('dry_run', args.dry_run, false);
 
     
     // Build transaction
@@ -75,6 +83,12 @@ async function placeLimitOrderHandler(
       payWithDeep: pay_with_deep,
     })(tx);
 
+    const order = { pool, side: is_bid ? 'buy' : 'sell', price, quantity, is_bid, order_type, client_order_id, pay_with_deep };
+    if (dry_run) {
+      const simulation = await simulateTransaction(tx, state);
+      return { content: [{ type: 'text', text: JSON.stringify({ dry_run: true, ...order, simulation }, null, 2) }] };
+    }
+
     // Execute transaction
     const result = await executeTransaction(tx, state);
 
@@ -82,13 +96,7 @@ async function placeLimitOrderHandler(
     const response = {
       success: true,
       tx_digest: result.tx_digest,
-      pool,
-      price,
-      quantity,
-      is_bid,
-      order_type,
-      client_order_id,
-      pay_with_deep,
+      ...order,
       dry_run: false,
     };
 
@@ -113,12 +121,16 @@ async function placeMarketOrderHandler(
     await performPrerequisiteChecks(state);
 
     // Extract and validate required parameters
-    const pool = args.pool as string;
-    const quantity = parseFloat(args.quantity as string);
-    const is_bid = args.is_bid as boolean;
+    const pool = requireAllowedPool(args.pool);
+    const quantity = requirePositiveNumber('quantity', args.quantity);
+    const is_bid = requireBoolean('is_bid', args.is_bid);
 
     // Extract optional parameters with defaults
-    const pay_with_deep = args.pay_with_deep !== undefined ? (args.pay_with_deep as boolean) : true;
+    const pay_with_deep = optionalBoolean('pay_with_deep', args.pay_with_deep, true);
+    const dry_run = optionalBoolean('dry_run', args.dry_run, false);
+
+    // Market orders fill at any price: refuse if the book would fill more than MAX_SLIPPAGE_PCT from mid
+    const price_check = await checkMarketOrderSlippage(state, pool, is_bid, quantity, maxSlippagePct());
 
     
     // Generate client order ID
@@ -137,6 +149,12 @@ async function placeMarketOrderHandler(
       payWithDeep: pay_with_deep,
     })(tx);
 
+    const order = { pool, side: is_bid ? 'buy' : 'sell', quantity, is_bid, pay_with_deep, price_check };
+    if (dry_run) {
+      const simulation = await simulateTransaction(tx, state);
+      return { content: [{ type: 'text', text: JSON.stringify({ dry_run: true, ...order, simulation }, null, 2) }] };
+    }
+
     // Execute transaction
     const result = await executeTransaction(tx, state);
 
@@ -144,10 +162,7 @@ async function placeMarketOrderHandler(
     const response = {
       success: true,
       tx_digest: result.tx_digest,
-      pool,
-      quantity,
-      is_bid,
-      pay_with_deep,
+      ...order,
       dry_run: false,
     };
 
@@ -172,10 +187,9 @@ async function cancelOrderHandler(
     await performPrerequisiteChecks(state);
 
     // Extract parameters
-    const pool = args.pool as string;
-    const order_id = args.order_id as number;
+    const pool = requireAllowedPool(args.pool);
+    const order_id = requireOrderId('order_id', args.order_id);
 
-    
     // Build transaction
     const tx = new Transaction();
     // SDK returns (tx) => void — call it directly on the tx builder
@@ -215,7 +229,7 @@ async function cancelAllOrdersHandler(
     await performPrerequisiteChecks(state);
 
     // Extract parameters
-    const pool = args.pool as string;
+    const pool = requireAllowedPool(args.pool);
 
     // Build transaction
     const tx = new Transaction();
@@ -255,9 +269,9 @@ async function modifyOrderHandler(
     await performPrerequisiteChecks(state);
 
     // Extract parameters
-    const pool = args.pool as string;
-    const order_id = args.order_id as number;
-    const new_quantity = args.new_quantity as number;
+    const pool = requireAllowedPool(args.pool);
+    const order_id = requireOrderId('order_id', args.order_id);
+    const new_quantity = requirePositiveNumber('new_quantity', args.new_quantity);
 
     // Build transaction
     const tx = new Transaction();
@@ -299,7 +313,7 @@ async function withdrawSettledAmountsHandler(
     await performPrerequisiteChecks(state);
 
     // Extract parameters
-    const pool = args.pool as string;
+    const pool = requireAllowedPool(args.pool);
 
     // Build transaction
     const tx = new Transaction();
@@ -337,12 +351,8 @@ async function depositHandler(
   try {
     await performPrerequisiteChecks(state);
 
-    const coinKey = args.coin_key as string;
-    const amount = parseFloat(args.amount as string);
-
-    if (!['SUI', 'USDC', 'DEEP'].includes(coinKey)) {
-      throw new Error(`Invalid coin_key: '${coinKey}'. Must be SUI, USDC, or DEEP.`);
-    }
+    const coinKey = requireOneOf('coin_key', args.coin_key, ['SUI', 'USDC', 'DEEP'] as const);
+    const amount = requirePositiveNumber('amount', args.amount);
 
     const tx = new Transaction();
     const balanceManager = state.client.deepbook.balanceManager as any;
@@ -379,10 +389,7 @@ async function depositAllHandler(
 
     const { client, keypair } = state;
 
-    const coinKey = args.coin_key as string;
-    if (!['SUI', 'USDC', 'DEEP'].includes(coinKey)) {
-      throw new Error(`Invalid coin_key: '${coinKey}'. Must be SUI, USDC, or DEEP.`);
-    }
+    const coinKey = requireOneOf('coin_key', args.coin_key, ['SUI', 'USDC', 'DEEP'] as const);
 
     const COIN_TYPES: Record<string, string> = {
       SUI: '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI',
@@ -450,7 +457,7 @@ async function depositAllHandler(
 export const orderTools = [
   {
     name: 'place_limit_order',
-    description: 'Place a GTC limit order on a DeepBook pool.',
+    description: 'Place a GTC limit order on a DeepBook pool (pool must be in ALLOWED_POOLS). Set dry_run=true to preview it first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -481,13 +488,18 @@ export const orderTools = [
           description: 'Pay taker fees with DEEP tokens (true) or base/quote assets (false)',
           default: true,
         },
+        dry_run: {
+          type: 'boolean',
+          description: 'If true, simulate the order and return the expected balance changes without sending it. Use this to show the user what will happen before they confirm.',
+          default: false,
+        },
       },
       required: ['pool', 'price', 'quantity', 'is_bid'],
     },
   },
   {
     name: 'place_market_order',
-    description: 'Place a market order on a DeepBook pool. Taker fees apply.',
+    description: 'Place a market order on a DeepBook pool (pool must be in ALLOWED_POOLS). Taker fees apply. Refused if the order book would fill it more than MAX_SLIPPAGE_PCT (default 1%) worse than the mid price; the expected average price is returned as price_check. Set dry_run=true to preview it first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -508,6 +520,11 @@ export const orderTools = [
           description: 'Pay taker fees with DEEP tokens (true) or base/quote assets (false)',
           default: true,
         },
+        dry_run: {
+          type: 'boolean',
+          description: 'If true, simulate the order and return the expected balance changes without sending it. Use this to show the user what will happen before they confirm.',
+          default: false,
+        },
       },
       required: ['pool', 'quantity', 'is_bid'],
     },
@@ -523,8 +540,8 @@ export const orderTools = [
           description: 'Pool key, e.g. SUI_USDC or DEEP_USDC',
         },
         order_id: {
-          type: 'number',
-          description: 'Protocol order ID to cancel',
+          type: 'string',
+          description: 'Protocol order ID to cancel, as a string exactly as returned by get_open_orders (IDs are too large for a number)',
         },
       },
       required: ['pool', 'order_id'],
@@ -555,8 +572,8 @@ export const orderTools = [
           description: 'Pool key, e.g. SUI_USDC or DEEP_USDC',
         },
         order_id: {
-          type: 'number',
-          description: 'Protocol order ID to modify',
+          type: 'string',
+          description: 'Protocol order ID to modify, as a string exactly as returned by get_open_orders (IDs are too large for a number)',
         },
         new_quantity: {
           type: 'number',

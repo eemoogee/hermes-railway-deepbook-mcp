@@ -1,5 +1,8 @@
 import { Transaction } from '@mysten/sui/transactions';
+import { mainnetCoins, mainnetPools, testnetCoins, testnetPools } from '@mysten/deepbook-v3';
 import { executeTransaction } from '../utils/tx-executor.js';
+import { config } from '../config.js';
+import { requireAllowedPool, requirePositiveNumber, optionalNonNegativeNumber, requireOneOf } from '../utils/validate.js';
 import type { AppState } from '../client.js';
 
 // Handler signature
@@ -22,29 +25,30 @@ async function executeFlashLoanHandler(
   state: AppState
 ): Promise<{ content: { type: string; text: string }[] }> {
   try {
-    const pool = args.pool as string;
-    const borrow_side = args.borrow_side as string;
-    const borrow_amount = args.borrow_amount as number;
-    const min_profit = (args.min_profit as number) ?? 0;
-    const operations = args.operations as FlashLoanOperation[];
-
     // Prerequisite checks
     if (!state.keypair) {
       throw new Error('Cannot execute flash loan: MCP server is in read-only mode.');
     }
-    if (!operations || operations.length === 0) {
+
+    const pool = requireAllowedPool(args.pool);
+    const borrow_side = requireOneOf('borrow_side', args.borrow_side, ['base', 'quote'] as const);
+    const borrow_amount = requirePositiveNumber('borrow_amount', args.borrow_amount);
+    const min_profit = optionalNonNegativeNumber('min_profit', args.min_profit, 0);
+    const operations = args.operations as FlashLoanOperation[];
+
+    if (!Array.isArray(operations) || operations.length === 0) {
       throw new Error('operations array must not be empty.');
     }
     for (const op of operations) {
       if (op.type !== 'swap_base_for_quote' && op.type !== 'swap_quote_for_base') {
         throw new Error(`Unsupported operation type: ${op.type}`);
       }
-      if (op.pct < 1 || op.pct > 100) {
+      requireAllowedPool(op.pool, 'operation pool');
+      if (!(op.pct >= 1 && op.pct <= 100)) {
         throw new Error(`Operation pct must be between 1 and 100, got: ${op.pct}`);
       }
-    }
-    if (borrow_side !== 'base' && borrow_side !== 'quote') {
-      throw new Error(`borrow_side must be 'base' or 'quote', got: ${borrow_side}`);
+      if (op.amount !== undefined) requirePositiveNumber('operation amount', op.amount);
+      if (op.deepAmount !== undefined) optionalNonNegativeNumber('operation deepAmount', op.deepAmount, 0);
     }
 
     const tx = new Transaction();
@@ -52,21 +56,14 @@ async function executeFlashLoanHandler(
     const deepbookContract = (state.client.deepbook as any).deepBook;
     const senderAddress = state.keypair.toSuiAddress();
 
-    // Pool asset lookup — matches SDK mainnetPools
-    const POOL_ASSETS: Record<string, { base: string; quote: string }> = {
-      DEEP_SUI:   { base: 'DEEP',  quote: 'SUI'  },
-      SUI_USDC:   { base: 'SUI',   quote: 'USDC' },
-      DEEP_USDC:  { base: 'DEEP',  quote: 'USDC' },
-      WUSDT_USDC: { base: 'WUSDT', quote: 'USDC' },
-      WUSDC_USDC: { base: 'WUSDC', quote: 'USDC' },
-      BETH_USDC:  { base: 'BETH',  quote: 'USDC' },
-      NS_USDC:    { base: 'NS',    quote: 'USDC' },
-      NS_SUI:     { base: 'NS',    quote: 'SUI'  },
-      TYPUS_SUI:  { base: 'TYPUS', quote: 'SUI'  },
-      SUI_AUSD:   { base: 'SUI',   quote: 'AUSD' },
-      AUSD_USDC:  { base: 'AUSD',  quote: 'USDC' },
-      DRF_SUI:    { base: 'DRF',   quote: 'SUI'  },
-    };
+    // Pool base/quote coins from the SDK's own pool list for this network
+    const sdkPools = config.network === 'testnet' ? testnetPools : mainnetPools;
+    const POOL_ASSETS: Record<string, { base: string; quote: string }> = Object.fromEntries(
+      Object.entries(sdkPools).map(([key, p]) => [key, { base: p.baseCoin, quote: p.quoteCoin }]),
+    );
+    for (const key of [pool, ...operations.map((op) => op.pool)]) {
+      if (!POOL_ASSETS[key]) throw new Error(`Unknown DeepBook pool: ${key}`);
+    }
 
     // Step 1 — Borrow
     // After borrowing, exactly one of baseCoin/quoteCoin is set; the other is null.
@@ -159,13 +156,20 @@ async function executeFlashLoanHandler(
       profitCoin = baseCoin;
     }
 
-    if (borrow_side === 'base') {
-      const remainder = flashLoanContract.returnBaseAsset(pool, borrow_amount, repayCoin, flashLoan)(tx);
-      tx.transferObjects([remainder], senderAddress);
-    } else {
-      const remainder = flashLoanContract.returnQuoteAsset(pool, borrow_amount, repayCoin, flashLoan)(tx);
-      tx.transferObjects([remainder], senderAddress);
+    const remainder = borrow_side === 'base'
+      ? flashLoanContract.returnBaseAsset(pool, borrow_amount, repayCoin, flashLoan)(tx)
+      : flashLoanContract.returnQuoteAsset(pool, borrow_amount, repayCoin, flashLoan)(tx);
+
+    // Enforce min_profit on-chain: splitting it off the post-repayment remainder aborts the
+    // whole transaction when the remainder is smaller, so an unprofitable loan never lands
+    if (min_profit > 0) {
+      const coins = config.network === 'testnet' ? testnetCoins : mainnetCoins;
+      const scalar = coins[borrowedKey]?.scalar;
+      if (!scalar) throw new Error(`Unknown decimals for ${borrowedKey}; cannot enforce min_profit.`);
+      const [profitFloor] = tx.splitCoins(remainder, [Math.round(min_profit * scalar)]);
+      tx.transferObjects([profitFloor], senderAddress);
     }
+    tx.transferObjects([remainder], senderAddress);
     if (profitCoin !== null) tx.transferObjects([profitCoin], senderAddress);
 
     // Step 4 — Execute
@@ -204,7 +208,7 @@ export const flashLoanTools = [
       properties: {
         pool: {
           type: 'string',
-          description: 'Pool key to borrow from, e.g. DEEP_SUI or SUI_USDC',
+          description: 'Pool key to borrow from (must be in ALLOWED_POOLS, as must every operation pool), e.g. SUI_USDC',
         },
         borrow_side: {
           type: 'string',
@@ -217,7 +221,7 @@ export const flashLoanTools = [
         },
         min_profit: {
           type: 'number',
-          description: 'Minimum profit in borrowed asset units. Default 0 (no minimum).',
+          description: 'Minimum profit in borrowed asset units, left over after repaying the loan. Enforced on-chain: if the remainder is smaller, the whole transaction reverts. Default 0 (no minimum).',
           default: 0,
         },
         operations: {
