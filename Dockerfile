@@ -1,4 +1,8 @@
-FROM python:3.14-slim AS builder
+# Hermes main supports Python 3.14; its release tags (v2026.9.x) require Python < 3.14,
+# so build a tag with PYTHON_VERSION=3.13
+ARG PYTHON_VERSION=3.14
+
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 ARG HERMES_GIT_REF=main
 
@@ -20,7 +24,7 @@ RUN pip install --no-cache-dir websockets -e "/opt/hermes-agent[messaging,cron,c
 RUN pip install --no-cache-dir 'hermes-agent[mcp]'
 
 
-FROM python:3.14-slim
+FROM python:${PYTHON_VERSION}-slim
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
