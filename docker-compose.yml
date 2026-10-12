@@ -1,0 +1,11 @@
+services:
+  dulcibella:
+    build:
+      context: .
+      args:
+        HERMES_GIT_REF: v2026.9.7
+    container_name: dulcibella
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data
