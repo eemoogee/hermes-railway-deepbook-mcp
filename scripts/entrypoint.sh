@@ -283,11 +283,26 @@ with open('${CONFIG_FILE}', 'w') as f:
 
 inject_muneo_config() {
   # MUNEO_REPO is the GitHub repo the Muneo tools read reports from; GITHUB_REPO is its older name
+  local repo="${MUNEO_REPO:-${GITHUB_REPO:-}}"
   if grep -qE '^[[:space:]]+GITHUB_REPO:' "$CONFIG_FILE" 2>/dev/null; then
     echo "[bootstrap] Renaming GITHUB_REPO to MUNEO_REPO in MCP config"
-    sed -i -E 's/^([[:space:]]+)GITHUB_REPO:/\1MUNEO_REPO:/' "$CONFIG_FILE"
+    # A \${GITHUB_REPO} placeholder would stop resolving once .env uses MUNEO_REPO, so write the value instead
+    REPO="$repo" python3 -c "
+import os, re
+path = '${CONFIG_FILE}'
+repo = os.environ['REPO']
+with open(path, 'r') as f:
+    content = f.read()
+def rename(m):
+    value = m.group(2)
+    if repo and re.fullmatch(r'[\"\']?\\$\{[^}]+\}[\"\']?', value.strip()):
+        value = '\"' + repo + '\"'
+    return m.group(1) + 'MUNEO_REPO: ' + value
+content = re.sub(r'(?m)^([ \t]+)GITHUB_REPO:[ \t]*(.*)$', rename, content)
+with open(path, 'w') as f:
+    f.write(content)
+"
   fi
-  local repo="${MUNEO_REPO:-${GITHUB_REPO:-}}"
   if [[ -z "$repo" ]]; then
     return
   fi
