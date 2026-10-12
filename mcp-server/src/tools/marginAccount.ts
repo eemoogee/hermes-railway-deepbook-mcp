@@ -1,6 +1,7 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { executeTransaction } from '../utils/tx-executor.js';
 import { config } from '../config.js';
+import { requirePositiveNumber } from '../utils/validate.js';
 import type { AppState } from '../client.js';
 
 // Common handler signature for all margin account tools
@@ -30,7 +31,7 @@ async function depositMarginHandler(
     }
 
     const coin_type = args.coin_type as string;
-    const amount = args.amount as number;
+    const amount = requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     if (coin_type !== 'SUI' && coin_type !== 'USDC') {
@@ -77,7 +78,7 @@ async function withdrawMarginHandler(
     }
 
     const coin_type = args.coin_type as string;
-    const amount = args.amount as number;
+    const amount = requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     if (coin_type !== 'SUI' && coin_type !== 'USDC') {
@@ -170,7 +171,7 @@ async function borrowBaseHandler(
       throw new Error('borrow_base requires signing mode (SUI_PRIVATE_KEY configured).');
     }
 
-    const amount = args.amount as number;
+    const amount = requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     const tx = new Transaction();
@@ -208,7 +209,7 @@ async function borrowQuoteHandler(
       throw new Error('borrow_quote requires signing mode (SUI_PRIVATE_KEY configured).');
     }
 
-    const amount = args.amount as number;
+    const amount = requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     const tx = new Transaction();
@@ -246,7 +247,8 @@ async function repayBaseHandler(
       throw new Error('repay_base requires signing mode (SUI_PRIVATE_KEY configured).');
     }
 
-    const amount = args.amount as number | undefined;
+    // Omitted amount means repay everything
+    const amount = args.amount === undefined || args.amount === null ? undefined : requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     const tx = new Transaction();
@@ -289,7 +291,8 @@ async function repayQuoteHandler(
       throw new Error('repay_quote requires signing mode (SUI_PRIVATE_KEY configured).');
     }
 
-    const amount = args.amount as number | undefined;
+    // Omitted amount means repay everything
+    const amount = args.amount === undefined || args.amount === null ? undefined : requirePositiveNumber('amount', args.amount);
     const mm = (state.client.deepbook as any).marginManager;
 
     const tx = new Transaction();
