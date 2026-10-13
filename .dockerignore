@@ -8,3 +8,10 @@ venv
 __pycache__
 *.pyc
 *.log
+# Runtime data, secrets and local tooling never belong in the build context
+data/
+.tmpdata/
+.env
+.env.*
+.claude/
+mcp-server/dist
