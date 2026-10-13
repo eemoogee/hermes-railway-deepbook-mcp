@@ -6,7 +6,8 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { executeTransaction } from '../utils/tx-executor.js';
 import { config, isPoolAllowed } from '../config.js';
-import { requirePositiveNumber, requireOneOf } from '../utils/validate.js';
+import { requirePositiveNumber } from '../utils/validate.js';
+import { SUPPORTED_COINS, networkCoins, requireNetworkCoin } from '../utils/coins.js';
 import type { AppState } from '../client.js';
 
 // Common handler signature for all account tools
@@ -46,8 +47,7 @@ async function getBalancesHandler(
 
     const { client } = state;
 
-    // Query balances for SUI, USDC, and DEEP
-    const coinKeys = ['SUI', 'USDC', 'DEEP'] as const;
+    const coinKeys = networkCoins().map((c) => c.key);
     const balancePromises = coinKeys.map(coinKey =>
       client.deepbook.checkManagerBalance(MANAGER_KEY, coinKey)
     );
@@ -271,27 +271,20 @@ async function getWalletBalanceHandler(
 
     const address = keypair.toSuiAddress();
 
-    const COIN_TYPES: Record<string, string> = {
-      SUI: '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI',
-      USDC: '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC',
-      DEEP: '0xdeeb7a4662eec9f2f3def03fb937a663dddaa2e215b8078a284d026b7946c270::deep::DEEP',
-    };
-
-    // On-chain balances are integers in the coin's smallest unit (1 SUI = 10^9, 1 USDC/DEEP = 10^6)
-    const DECIMALS: Record<string, number> = { SUI: 9, USDC: 6, DEEP: 6 };
     const balances: { coin: string; coinType: string; balance: number; balance_raw: string }[] = [];
 
-    for (const [coinKey, coinType] of Object.entries(COIN_TYPES)) {
+    // On-chain balances are integers in the coin's smallest unit (1 SUI = 10^9, 1 USDC/DEEP/USDSUI = 10^6)
+    for (const { key, type, scalar } of networkCoins()) {
       const suiClient = client as any;
       const response = await suiClient.getBalance({
         owner: address,
-        coinType,
+        coinType: type,
       });
       const rawBalance = response?.balance?.balance ?? '0';
       balances.push({
-        coin: coinKey,
-        coinType,
-        balance: Number(rawBalance) / 10 ** DECIMALS[coinKey],
+        coin: key,
+        coinType: type,
+        balance: Number(rawBalance) / scalar,
         balance_raw: rawBalance,
       });
     }
@@ -322,7 +315,7 @@ async function withdrawFromBalanceManagerHandler(
   try {
     await performWithdrawalChecks(state);
 
-    const coin_type = requireOneOf('coin_type', args.coin_type, ['SUI', 'USDC', 'DEEP'] as const);
+    const coin_type = requireNetworkCoin('coin_type', args.coin_type);
     const amount = requirePositiveNumber('amount', args.amount);
 
     const address = state.keypair!.toSuiAddress();
@@ -368,7 +361,7 @@ async function withdrawAllFromBalanceManagerHandler(
   try {
     await performWithdrawalChecks(state);
 
-    const coin_type = requireOneOf('coin_type', args.coin_type, ['SUI', 'USDC', 'DEEP'] as const);
+    const coin_type = requireNetworkCoin('coin_type', args.coin_type);
 
     const address = state.keypair!.toSuiAddress();
     const tx = new Transaction();
@@ -406,7 +399,7 @@ async function withdrawAllFromBalanceManagerHandler(
 export const accountTools = [
   {
     name: 'get_balances',
-    description: 'Get SUI, USDC, and DEEP balances from the BalanceManager.',
+    description: 'Get SUI, USDC, DEEP and USDSUI balances from the BalanceManager.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -474,7 +467,7 @@ export const accountTools = [
   },
   {
     name: 'get_wallet_balance',
-    description: 'Get SUI, USDC, and DEEP balances from the raw wallet address (on-chain, not BalanceManager). Returns the total balance for each coin type owned by the wallet: balance is in whole coins, balance_raw in the coin\'s smallest on-chain unit.',
+    description: 'Get SUI, USDC, DEEP and USDSUI balances from the raw wallet address (on-chain, not BalanceManager). Returns the total balance for each coin type owned by the wallet: balance is in whole coins, balance_raw in the coin\'s smallest on-chain unit.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -488,8 +481,8 @@ export const accountTools = [
       properties: {
         coin_type: {
           type: 'string',
-          description: 'Coin type to withdraw: SUI, USDC, or DEEP',
-          enum: ['SUI', 'USDC', 'DEEP'],
+          description: 'Coin type to withdraw: SUI, USDC, DEEP or USDSUI',
+          enum: [...SUPPORTED_COINS],
         },
         amount: {
           type: 'number',
@@ -507,8 +500,8 @@ export const accountTools = [
       properties: {
         coin_type: {
           type: 'string',
-          description: 'Coin type to withdraw: SUI, USDC, or DEEP',
-          enum: ['SUI', 'USDC', 'DEEP'],
+          description: 'Coin type to withdraw: SUI, USDC, DEEP or USDSUI',
+          enum: [...SUPPORTED_COINS],
         },
       },
       required: ['coin_type'],
