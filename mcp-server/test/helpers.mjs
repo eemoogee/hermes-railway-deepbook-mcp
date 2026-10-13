@@ -27,6 +27,7 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
 
   const deepbook = {
     midPrice: async () => book.mid,
+    poolBookParams: async () => ({ tickSize: 0.00001, lotSize: book.lotSize ?? 0.1, minSize: book.minSize ?? 1 }),
     getQuoteQuantityOut: async (pool, qty) => ({ baseQuantity: qty, ...book.quoteOut(qty) }),
     getBaseQuantityOut: async (pool, qty) => ({ quoteQuantity: qty, ...book.baseOut(qty) }),
     deepBook: {

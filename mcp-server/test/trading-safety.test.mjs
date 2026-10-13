@@ -234,6 +234,32 @@ test('execute_flash_loan enforces min_profit on-chain by splitting it off the re
 // Account and executor
 // ---------------------------------------------------------------------------
 
+test('a swap remainder smaller than one lot is returned, not treated as missing liquidity', async () => {
+  // The live case: 2 USDSUI buys 1.8 SUI in 0.1 SUI lots at 1.075, leaving 0.065 USDSUI
+  const lotBook = {
+    mid: 1.075,
+    lotSize: 0.1,
+    quoteOut: (qty) => ({ quoteOut: qty * 1.07, baseOut: 0 }),
+    baseOut: (quote) => {
+      const base = Math.floor(quote / 1.075 / 0.1 + 1e-9) * 0.1;
+      return { baseOut: base, quoteOut: quote - base * 1.075 };
+    },
+  };
+  const { state, calls } = makeState({ book: lotBook });
+  const res = text(await swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 2 }, state));
+  assert.ok(Math.abs(res.expected_out - 1.8) < 1e-9);
+  assert.ok(Math.abs(res.input_returned - 0.065) < 1e-9);
+  assert.ok(Math.abs(sdkCall(calls, 'swapExactQuoteForBase').args[0].minOut - 1.8 * 0.99) < 1e-9);
+
+  // More than one lot left over is still a thin book
+  const thin = makeState({ book: { ...lotBook, baseOut: (quote) => ({ baseOut: 0.5, quoteOut: quote - 0.5 * 1.075 }) } });
+  await assert.rejects(swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 2 }, thin.state), /Not enough liquidity/);
+
+  // An amount below one minimum-size fill says so instead of blaming liquidity
+  const tiny = makeState({ book: { ...lotBook, baseOut: (quote) => ({ baseOut: 0, quoteOut: quote }) } });
+  await assert.rejects(swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 0.5 }, tiny.state), /minimum of 1 base/);
+});
+
 test('get_wallet_balance reports whole coins next to raw units', async () => {
   const { state } = makeState();
   const res = text(await accountHandlers.get_wallet_balance({}, state));

@@ -58,6 +58,8 @@ async function runSwap(
     pool,
     [amountKey]: amount,
     expected_out: guard.expected_out,
+    // Fills come in whole lots; any leftover input goes back to the wallet
+    input_returned: guard.input_returned,
     [minOutKey]: min_out,
     min_out_source: callerMinOut > 0 ? 'caller' : `quote minus ${guard.max_slippage_pct}% slippage`,
     deep_amount,
