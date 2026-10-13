@@ -6,6 +6,7 @@
 
 import { Transaction } from '@mysten/sui/transactions';
 import type { AppState } from '../client.js';
+import { describeBalanceChanges } from './coins.js';
 
 const MIST_PER_SUI = 1_000_000_000;
 
@@ -30,7 +31,13 @@ export function gasFeeSui(gasUsed: unknown): number | null {
 export async function executeTransaction(
   tx: Transaction,
   state: AppState
-): Promise<{ tx_digest: string; status: string; gas_fee_sui: number | null }> {
+): Promise<{
+  tx_digest: string;
+  status: string;
+  gas_fee_sui: number | null;
+  /** Net balance change per coin type for this wallet, in raw on-chain units (negative = left the wallet) */
+  balance_changes: { coin_type: string; amount_raw: string }[];
+}> {
   if (!state.keypair) {
     throw new Error(
       'Cannot execute transaction: MCP server is in read-only mode. SUI_PRIVATE_KEY is not configured.'
@@ -40,7 +47,7 @@ export async function executeTransaction(
   const result = await state.client.core.signAndExecuteTransaction({
     transaction: tx,
     signer: state.keypair,
-    include: { effects: true },
+    include: { effects: true, balanceChanges: true },
   });
 
   // A transaction that executed but aborted on-chain comes back as FailedTransaction (gas is still spent)
@@ -56,7 +63,14 @@ export async function executeTransaction(
     tx_digest: digest,
     status: 'success',
     gas_fee_sui: gasFeeSui(result.Transaction?.effects?.gasUsed),
+    balance_changes: walletChanges(result.Transaction?.balanceChanges, state.keypair.toSuiAddress()),
   };
+}
+
+function walletChanges(changes: { address: string; coinType: string; amount: string }[] | undefined, address: string) {
+  return (changes ?? [])
+    .filter((c) => c.address === address)
+    .map((c) => ({ coin_type: c.coinType, amount_raw: c.amount }));
 }
 
 export interface SimulationResult {
@@ -64,6 +78,8 @@ export interface SimulationResult {
   error: unknown;
   /** Net balance change per coin type for this wallet, in raw on-chain units (negative = leaves the wallet) */
   balance_changes: { coin_type: string; amount_raw: string }[];
+  /** The same changes in whole coins, e.g. { coin: 'SUI', amount: -1.0 }; the SUI change includes the fee */
+  wallet_changes: ReturnType<typeof describeBalanceChanges>;
   /** Net network fee in SUI (already converted from MIST) */
   gas_fee_sui: number | null;
   /** Raw gas breakdown in MIST (1 SUI = 10^9 MIST) */
@@ -88,12 +104,12 @@ export async function simulateTransaction(tx: Transaction, state: AppState): Pro
   const executed = result.Transaction ?? result.FailedTransaction;
   const status = executed?.status as { success?: boolean; error?: unknown } | undefined;
 
+  const balance_changes = walletChanges(executed?.balanceChanges, address);
   return {
     would_succeed: Boolean(result.Transaction?.status?.success),
     error: status?.error ?? null,
-    balance_changes: (executed?.balanceChanges ?? [])
-      .filter((c) => c.address === address)
-      .map((c) => ({ coin_type: c.coinType, amount_raw: c.amount })),
+    balance_changes,
+    wallet_changes: describeBalanceChanges(balance_changes),
     gas_fee_sui: gasFeeSui(executed?.effects?.gasUsed),
     gas_used_mist: executed?.effects?.gasUsed ?? null,
   };

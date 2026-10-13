@@ -6,11 +6,12 @@
 import { Transaction } from '@mysten/sui/transactions';
 import { mainnetPools, testnetPools } from '@mysten/deepbook-v3';
 import { config } from '../config.js';
-import { executeTransaction, simulateTransaction } from '../utils/tx-executor.js';
+import { executeTransaction, simulateTransaction, type SimulationResult } from '../utils/tx-executor.js';
 import {
   requireAllowedPool, requirePositiveNumber, optionalNonNegativeNumber, optionalBoolean, maxSlippagePct,
 } from '../utils/validate.js';
 import { swapMinOut } from '../utils/slippage.js';
+import { coinByType, networkCoin, toWhole, walletBalanceRaw } from '../utils/coins.js';
 import type { AppState } from '../client.js';
 
 // Handler signature
@@ -32,10 +33,14 @@ function poolCoins(pool: string): { base: string; quote: string } {
   return { base: p.baseCoin, quote: p.quoteCoin };
 }
 
-function describeSimulation(simulation: { would_succeed: boolean; error: unknown; gas_fee_sui: number | null }): string {
+function describeSimulation(simulation: SimulationResult): string {
   if (simulation.would_succeed) {
+    const changes = simulation.wallet_changes
+      .filter((c): c is { coin: string; amount: number } => 'coin' in c)
+      .map((c) => `${c.amount > 0 ? '+' : ''}${Number(c.amount.toPrecision(6))} ${c.coin}`);
     return 'the simulation says it would succeed' +
-      (simulation.gas_fee_sui !== null ? `, network fee about ${Number(simulation.gas_fee_sui.toPrecision(3))} SUI` : '');
+      (simulation.gas_fee_sui !== null ? `, network fee about ${Number(simulation.gas_fee_sui.toPrecision(3))} SUI` : '') +
+      (changes.length ? `; wallet change ${changes.join(', ')}` : '');
   }
   const reason = typeof simulation.error === 'string' ? simulation.error : JSON.stringify(simulation.error);
   return `the simulation says it would FAIL: ${reason}`;
@@ -103,13 +108,42 @@ async function runSwap(
     return { content: [{ type: 'text', text: JSON.stringify({ summary, dry_run: true, ...swap, simulation }, null, 2) }] };
   }
 
+  // Read both balances first; afterwards each is this balance plus the transaction's own change,
+  // so the reported balances come from the chain, not from arithmetic in the chat
+  const tracked = [sellCoin, buyCoin].map((key) => networkCoin(key)).filter((c) => c !== null);
+  const before = await Promise.all(tracked.map((c) => walletBalanceRaw(state, senderAddress, c.type)));
+
   const result = await executeTransaction(tx, state);
+
+  const changeOf = (key: string) => result.balance_changes
+    .filter((c) => coinByType(c.coin_type)?.key === key)
+    .reduce((sum, c) => sum + BigInt(c.amount_raw), 0n);
+  const balances_after: Record<string, number> = {};
+  tracked.forEach((c, i) => { balances_after[c.key] = toWhole(before[i] + changeOf(c.key), c.scalar); });
+  const scalarOf = (key: string) => networkCoin(key)?.scalar;
+  const sold = scalarOf(sellCoin) ? -toWhole(changeOf(sellCoin), scalarOf(sellCoin)!) : null;
+  const received = scalarOf(buyCoin) ? toWhole(changeOf(buyCoin), scalarOf(buyCoin)!) : null;
+
   const fee = result.gas_fee_sui !== null ? ` Network fee ${Number(result.gas_fee_sui.toPrecision(3))} SUI.` : '';
-  const summary = `Swap sent: ${trade}. Digest ${result.tx_digest}.${fee}`;
+  const actual = sold !== null && received !== null
+    ? ` Actually spent ${fmt(sold)} ${sellCoin} and received ${fmt(received)} ${buyCoin}` +
+      ((sellCoin === 'SUI' || buyCoin === 'SUI') ? ' (the SUI figure includes the network fee)' : '') + '.'
+    : '';
+  const now = Object.keys(balances_after).length
+    ? ` Wallet now holds ${Object.entries(balances_after).map(([k, v]) => `${fmt(v)} ${k}`).join(' and ')}.`
+    : '';
+  const summary = `Swap sent: ${trade}. Digest ${result.tx_digest}.${actual}${fee}${now}`;
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify({ summary, success: true, tx_digest: result.tx_digest, gas_fee_sui: result.gas_fee_sui, ...swap, dry_run: false }, null, 2),
+      text: JSON.stringify({
+        summary, success: true, tx_digest: result.tx_digest, gas_fee_sui: result.gas_fee_sui,
+        ...swap,
+        // What really moved, from the transaction's own balance changes (whole coins, negative = spent)
+        actual: { sold, received },
+        balances_after,
+        dry_run: false,
+      }, null, 2),
     }],
   };
 }

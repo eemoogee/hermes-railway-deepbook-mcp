@@ -14,7 +14,13 @@ const GAS_USED = { computationCost: '750000', storageCost: '4560000', storageReb
 /**
  * book: { mid, quoteOut(baseQty) -> { quoteOut, baseOut }, baseOut(quoteQty) -> { baseOut, quoteOut } }
  */
-export function makeState({ book = defaultBook(), failTx = false } = {}) {
+const USDC_TYPE = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC';
+
+/**
+ * execChanges: the wallet's balance changes an executed transaction reports, as [coinType, rawAmount].
+ * The default is a 2 USDC -> SUI swap; SUI uses the short 0x2 form the chain often returns.
+ */
+export function makeState({ book = defaultBook(), failTx = false, execChanges = [[USDC_TYPE, '-2000000'], ['0x2::sui::SUI', '1996490000']] } = {}) {
   const calls = { sdk: [], executed: [], simulated: [] };
   const record = (name) => (...args) => {
     calls.sdk.push({ name, args });
@@ -33,6 +39,7 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
     poolBookParams: async () => ({ tickSize: 0.00001, lotSize: book.lotSize ?? 0.1, minSize: book.minSize ?? 1 }),
     getQuoteQuantityOut: async (pool, qty) => ({ baseQuantity: qty, ...book.quoteOut(qty) }),
     getBaseQuantityOut: async (pool, qty) => ({ quoteQuantity: qty, ...book.baseOut(qty) }),
+    getLevel2TicksFromMid: async () => ({ bid_prices: [0.999], bid_quantities: [10], ask_prices: [1.001], ask_quantities: [10] }),
     deepBook: {
       placeLimitOrder: (p) => record('placeLimitOrder')(p),
       placeMarketOrder: (p) => record('placeMarketOrder')(p),
@@ -65,7 +72,18 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
       calls.executed.push(transaction);
       return failTx
         ? { $kind: 'FailedTransaction', FailedTransaction: { digest: 'FAILED_DIGEST', status: { success: false, error: { message: 'MoveAbort 7' } } } }
-        : { $kind: 'Transaction', Transaction: { digest: 'TEST_DIGEST', status: { success: true }, effects: { gasUsed: GAS_USED } } };
+        : {
+          $kind: 'Transaction',
+          Transaction: {
+            digest: 'TEST_DIGEST',
+            status: { success: true },
+            effects: { gasUsed: GAS_USED },
+            balanceChanges: [
+              ...execChanges.map(([coinType, amount]) => ({ coinType, address: keypair.toSuiAddress(), amount })),
+              { coinType: USDC_TYPE, address: '0x' + 'c'.repeat(64), amount: '2000000' },
+            ],
+          },
+        };
     },
     simulateTransaction: async ({ transaction }) => {
       calls.simulated.push(transaction);

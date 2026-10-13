@@ -126,13 +126,15 @@ async function getTechnicalAnalysisHandler(
       interval,
       candle_count: candles.length,
       latest_close: latestClose,
+      // Start time of the newest candle; if it is far behind fetched_at, the indexer data is stale
+      latest_candle_at: new Date(candles[candles.length - 1].timestamp * 1000).toISOString(),
       rsi_14: rsi14,
       macd: macdResult,
       bollinger_bands: bbResult,
       ema_20: ema20,
       ema_50: ema50,
       ema_200: ema200,
-      timestamp: new Date().toISOString(),
+      fetched_at: new Date().toISOString(),
     };
 
     return {

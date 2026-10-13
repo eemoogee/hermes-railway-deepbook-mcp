@@ -36,7 +36,7 @@ async function getMidPriceHandler(
     const result = {
       pool,
       mid_price: midPrice,
-      timestamp: new Date().toISOString(),
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -82,6 +82,7 @@ async function getOrderbookDepthHandler(
       pool,
       bids,
       asks,
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -116,6 +117,7 @@ async function getQuoteForBaseHandler(
       base_quantity: quoteData.baseQuantity,
       quote_out: quoteData.quoteOut,
       deep_required: quoteData.deepRequired,
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -150,6 +152,7 @@ async function getBaseForQuoteHandler(
       quote_quantity: baseData.quoteQuantity,
       base_out: baseData.baseOut,
       deep_required: baseData.deepRequired,
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -182,6 +185,7 @@ async function getPoolTradeParamsHandler(
       taker_fee: tradeParams.takerFee,
       maker_fee: tradeParams.makerFee,
       stake_required: tradeParams.stakeRequired,
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -215,6 +219,7 @@ async function getPoolBookParamsHandler(
       tick_size: bookParamsAny.tickSize,
       lot_size: bookParamsAny.lotSize,
       min_size: bookParamsAny.minSize,
+      fetched_at: new Date().toISOString(),
     };
 
     return {
@@ -264,6 +269,7 @@ async function getPoolDeepPriceHandler(
         ? `DEEP conversion rate unavailable for ${pool}`
         : `1 ${asset} = ${fmt(deepPerAsset)} DEEP; 1 DEEP = ${fmt(assetPerDeep)} ${asset}`,
       note: 'Pool DEEP conversion rate used to calculate trading fees paid in DEEP, not a live DEEP market price.',
+      fetched_at: new Date().toISOString(),
     };
 
     return {

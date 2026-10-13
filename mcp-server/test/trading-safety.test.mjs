@@ -10,6 +10,7 @@ const { conditionalOrderHandlers } = await import('../dist/tools/conditionalOrde
 const { flashLoanHandlers } = await import('../dist/tools/flashLoans.js');
 const { accountHandlers } = await import('../dist/tools/account.js');
 const { executeTransaction } = await import('../dist/utils/tx-executor.js');
+const { marketDataHandlers } = await import('../dist/tools/market-data.js');
 
 // ---------------------------------------------------------------------------
 // Input validation
@@ -243,7 +244,7 @@ test('swap picks the pool and direction from sell_coin and buy_coin', async () =
   assert.equal(res.buy.coin, 'SUI');
   assert.equal(sdkCall(buySui.calls, 'swapExactQuoteForBase').args[0].amount, 2);
   assert.equal(sdkCall(buySui.calls, 'swapExactBaseForQuote'), undefined);
-  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC.* Network fee 0\.00151 SUI\.$/);
+  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC.* Network fee 0\.00151 SUI\./);
   assert.equal(res.gas_fee_sui, 0.00151);
 
   // Selling the base coin: swapExactBaseForQuote
@@ -265,7 +266,8 @@ test('swap refuses pairs outside the allowed pools and mismatched pools', async 
 test('a swap dry run summary names both coins and the simulation result', async () => {
   const { state, calls } = makeState();
   const res = text(await swapHandlers.swap({ sell_coin: 'USDC', buy_coin: 'SUI', amount: 2, dry_run: true }, state));
-  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed, network fee about 0\.00151 SUI\.$/);
+  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed, network fee about 0\.00151 SUI; wallet change -1 SUI\.$/);
+  assert.deepEqual(res.simulation.wallet_changes, [{ coin: 'SUI', amount: -1 }]);
   assert.equal(res.simulation.gas_fee_sui, 0.00151);
   assert.equal(res.simulation.gas_used_mist.computationCost, '750000');
   assert.equal(calls.executed.length, 0);
@@ -351,4 +353,30 @@ test('executeTransaction reports the digest and reason of an on-chain failure', 
   const { state } = makeState({ failTx: true });
   const { Transaction } = await import('@mysten/sui/transactions');
   await assert.rejects(executeTransaction(new Transaction(), state), /Digest: FAILED_DIGEST\. Reason: .*MoveAbort 7/);
+});
+
+test('a real swap reports what actually moved and the balances after, from the chain', async () => {
+  // Wallet starts with 2.5 SUI and 7 USDC; the transaction reports -2 USDC and +1.99649 SUI (net of the fee)
+  const { state, calls } = makeState();
+  const res = text(await swapHandlers.swap({ sell_coin: 'USDC', buy_coin: 'SUI', amount: 2 }, state));
+  assert.equal(calls.executed.length, 1);
+  assert.deepEqual(res.actual, { sold: 2, received: 1.99649 });
+  assert.deepEqual(res.balances_after, { USDC: 5, SUI: 4.49649 });
+  assert.match(res.summary, /Actually spent 2 USDC and received 1\.99649 SUI \(the SUI figure includes the network fee\)\./);
+  assert.match(res.summary, /Network fee 0\.00151 SUI\. Wallet now holds 5 USDC and 4\.49649 SUI\.$/);
+});
+
+test('market data results say when they were fetched', async () => {
+  const { state } = makeState();
+  const before = Date.now();
+  for (const [tool, args] of [
+    ['get_mid_price', { pool: 'SUI_USDC' }],
+    ['get_orderbook_depth', { pool: 'SUI_USDC' }],
+    ['get_quote_for_base', { pool: 'SUI_USDC', base_quantity: 1 }],
+    ['get_base_for_quote', { pool: 'SUI_USDC', quote_quantity: 1 }],
+  ]) {
+    const res = text(await marketDataHandlers[tool](args, state));
+    const at = Date.parse(res.fetched_at);
+    assert.ok(at >= before - 1000 && at <= Date.now() + 1000, `${tool} fetched_at ${res.fetched_at}`);
+  }
 });

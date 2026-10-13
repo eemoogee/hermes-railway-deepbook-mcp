@@ -112,6 +112,8 @@ Hermes passes only the variables listed in the `deepbook:` `env:` block of `conf
 - `true`/`false` arguments (buy vs sell, trigger direction) are strict: the string `"false"` is never read as true.
 - Market orders are refused if the order book would fill them more than `MAX_SLIPPAGE_PCT` from the mid price; swaps without a minimum get one from a live quote minus `MAX_SLIPPAGE_PCT`.
 - `place_limit_order`, `place_market_order` and both swaps accept `dry_run: true`, which simulates the transaction and returns the wallet's balance changes without sending it.
+- After a real swap, the result's `actual` and `balances_after` come from the transaction's own balance changes, so the agent never has to work out the new balance itself.
+- Market data and indicator results carry `fetched_at`; indicators also give `latest_candle_at`, so stale data is visible.
 - `execute_flash_loan`'s `min_profit` is enforced on-chain; Cetus liquidity removal uses the given `slippage` for its minimum amounts.
 - Withdrawals only ever pay the wallet's own address.
 
