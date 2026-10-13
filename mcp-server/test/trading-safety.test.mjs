@@ -234,6 +234,69 @@ test('execute_flash_loan enforces min_profit on-chain by splitting it off the re
 // Account and executor
 // ---------------------------------------------------------------------------
 
+test('swap picks the pool and direction from sell_coin and buy_coin', async () => {
+  // Buying the base coin (SUI) spends the quote coin: swapExactQuoteForBase
+  const buySui = makeState();
+  const res = text(await swapHandlers.swap({ sell_coin: 'usdc', buy_coin: 'SUI', amount: 2 }, buySui.state));
+  assert.equal(res.pool, 'SUI_USDC');
+  assert.deepEqual(res.sell, { coin: 'USDC', amount: 2 });
+  assert.equal(res.buy.coin, 'SUI');
+  assert.equal(sdkCall(buySui.calls, 'swapExactQuoteForBase').args[0].amount, 2);
+  assert.equal(sdkCall(buySui.calls, 'swapExactBaseForQuote'), undefined);
+  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC.* Network fee 0\.00151 SUI\.$/);
+  assert.equal(res.gas_fee_sui, 0.00151);
+
+  // Selling the base coin: swapExactBaseForQuote
+  const sellSui = makeState();
+  await swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'USDC', amount: 3 }, sellSui.state);
+  assert.equal(sdkCall(sellSui.calls, 'swapExactBaseForQuote').args[0].amount, 3);
+  assert.equal(sdkCall(sellSui.calls, 'swapExactQuoteForBase'), undefined);
+});
+
+test('swap refuses pairs outside the allowed pools and mismatched pools', async () => {
+  const { state, calls } = makeState();
+  // DEEP_SUI exists on DeepBook but is not in ALLOWED_POOLS
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'DEEP', amount: 1 }, state), /No allowed pool trades SUI and DEEP/);
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'USDC', amount: 1, pool: 'DEEP_USDC' }, state), /trades DEEP\/USDC, not SUI\/USDC/);
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'SUI', amount: 1 }, state), /must be different/);
+  assert.equal(calls.executed.length, 0);
+});
+
+test('a swap dry run summary names both coins and the simulation result', async () => {
+  const { state, calls } = makeState();
+  const res = text(await swapHandlers.swap({ sell_coin: 'USDC', buy_coin: 'SUI', amount: 2, dry_run: true }, state));
+  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed, network fee about 0\.00151 SUI\.$/);
+  assert.equal(res.simulation.gas_fee_sui, 0.00151);
+  assert.equal(res.simulation.gas_used_mist.computationCost, '750000');
+  assert.equal(calls.executed.length, 0);
+});
+
+test('a swap remainder smaller than one lot is returned, not treated as missing liquidity', async () => {
+  // The live case: 2 USDSUI buys 1.8 SUI in 0.1 SUI lots at 1.075, leaving 0.065 USDSUI
+  const lotBook = {
+    mid: 1.075,
+    lotSize: 0.1,
+    quoteOut: (qty) => ({ quoteOut: qty * 1.07, baseOut: 0 }),
+    baseOut: (quote) => {
+      const base = Math.floor(quote / 1.075 / 0.1 + 1e-9) * 0.1;
+      return { baseOut: base, quoteOut: quote - base * 1.075 };
+    },
+  };
+  const { state, calls } = makeState({ book: lotBook });
+  const res = text(await swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 2 }, state));
+  assert.ok(Math.abs(res.expected_out - 1.8) < 1e-9);
+  assert.ok(Math.abs(res.input_returned - 0.065) < 1e-9);
+  assert.ok(Math.abs(sdkCall(calls, 'swapExactQuoteForBase').args[0].minOut - 1.8 * 0.99) < 1e-9);
+
+  // More than one lot left over is still a thin book
+  const thin = makeState({ book: { ...lotBook, baseOut: (quote) => ({ baseOut: 0.5, quoteOut: quote - 0.5 * 1.075 }) } });
+  await assert.rejects(swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 2 }, thin.state), /Not enough liquidity/);
+
+  // An amount below one minimum-size fill says so instead of blaming liquidity
+  const tiny = makeState({ book: { ...lotBook, baseOut: (quote) => ({ baseOut: 0, quoteOut: quote }) } });
+  await assert.rejects(swapHandlers.swap_quote_for_base({ pool: 'SUI_USDC', quote_amount: 0.5 }, tiny.state), /minimum of 1 base/);
+});
+
 test('get_wallet_balance reports whole coins next to raw units', async () => {
   const { state } = makeState();
   const res = text(await accountHandlers.get_wallet_balance({}, state));

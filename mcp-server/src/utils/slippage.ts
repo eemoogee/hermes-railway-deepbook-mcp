@@ -6,16 +6,21 @@ import type { AppState } from '../client.js';
 
 /** A fill this close to complete counts as complete (float dust from the quote maths). */
 const FILL_EPSILON = 1e-9;
+/** Slack on the one-lot remainder, for price differences between the levels the lot would fill at. */
+const LOT_MARGIN = 0.05;
 
 export interface SwapGuard {
   expected_out: number;
   min_out: number;
   max_slippage_pct: number;
+  /** Input the pool cannot use because fills come in whole lots; the swap returns it to the wallet */
+  input_returned: number;
 }
 
 /**
  * Expected output of a swap and the minimum to accept: expected * (1 - slippage).
- * Throws if the book cannot absorb the whole input.
+ * DeepBook fills base in whole lots, so a remainder worth less than one lot is normal and is
+ * returned to the wallet; more than that unfilled means the book cannot absorb the input.
  */
 export async function swapMinOut(
   state: AppState,
@@ -25,27 +30,36 @@ export async function swapMinOut(
   maxSlippagePct: number,
 ): Promise<SwapGuard> {
   const deepbook = state.client.deepbook;
+  const { lotSize, minSize } = await deepbook.poolBookParams(pool);
   let expected: number;
   let unfilled: number;
+  let oneLotOfInput: number;
   if (direction === 'base_for_quote') {
     const q = await deepbook.getQuoteQuantityOut(pool, amountIn);
     expected = q.quoteOut;
     unfilled = q.baseOut;
+    oneLotOfInput = lotSize;
   } else {
     const q = await deepbook.getBaseQuantityOut(pool, amountIn);
     expected = q.baseOut;
     unfilled = q.quoteOut;
+    // Price of one lot in quote, from this quote's own average price
+    oneLotOfInput = expected > 0 ? lotSize * (amountIn - unfilled) / expected : 0;
   }
   if (!(expected > 0)) {
-    throw new Error(`No liquidity: a swap of ${amountIn} on ${pool} would return nothing.`);
+    throw new Error(
+      `A swap of ${amountIn} on ${pool} would return nothing: either the book is empty or the amount buys less than ` +
+      `the pool's minimum of ${minSize} base (fills come in lots of ${lotSize}).`,
+    );
   }
-  if (unfilled > FILL_EPSILON * Math.max(1, amountIn)) {
+  if (unfilled > oneLotOfInput * (1 + LOT_MARGIN) + FILL_EPSILON * Math.max(1, amountIn)) {
     throw new Error(`Not enough liquidity on ${pool}: ${unfilled} of the ${amountIn} input would not be swapped.`);
   }
   return {
     expected_out: expected,
     min_out: expected * (1 - maxSlippagePct / 100),
     max_slippage_pct: maxSlippagePct,
+    input_returned: unfilled,
   };
 }
 
