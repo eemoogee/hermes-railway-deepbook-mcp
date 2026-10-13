@@ -234,6 +234,40 @@ test('execute_flash_loan enforces min_profit on-chain by splitting it off the re
 // Account and executor
 // ---------------------------------------------------------------------------
 
+test('swap picks the pool and direction from sell_coin and buy_coin', async () => {
+  // Buying the base coin (SUI) spends the quote coin: swapExactQuoteForBase
+  const buySui = makeState();
+  const res = text(await swapHandlers.swap({ sell_coin: 'usdc', buy_coin: 'SUI', amount: 2 }, buySui.state));
+  assert.equal(res.pool, 'SUI_USDC');
+  assert.deepEqual(res.sell, { coin: 'USDC', amount: 2 });
+  assert.equal(res.buy.coin, 'SUI');
+  assert.equal(sdkCall(buySui.calls, 'swapExactQuoteForBase').args[0].amount, 2);
+  assert.equal(sdkCall(buySui.calls, 'swapExactBaseForQuote'), undefined);
+  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC/);
+
+  // Selling the base coin: swapExactBaseForQuote
+  const sellSui = makeState();
+  await swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'USDC', amount: 3 }, sellSui.state);
+  assert.equal(sdkCall(sellSui.calls, 'swapExactBaseForQuote').args[0].amount, 3);
+  assert.equal(sdkCall(sellSui.calls, 'swapExactQuoteForBase'), undefined);
+});
+
+test('swap refuses pairs outside the allowed pools and mismatched pools', async () => {
+  const { state, calls } = makeState();
+  // DEEP_SUI exists on DeepBook but is not in ALLOWED_POOLS
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'DEEP', amount: 1 }, state), /No allowed pool trades SUI and DEEP/);
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'USDC', amount: 1, pool: 'DEEP_USDC' }, state), /trades DEEP\/USDC, not SUI\/USDC/);
+  await assert.rejects(swapHandlers.swap({ sell_coin: 'SUI', buy_coin: 'SUI', amount: 1 }, state), /must be different/);
+  assert.equal(calls.executed.length, 0);
+});
+
+test('a swap dry run summary names both coins and the simulation result', async () => {
+  const { state, calls } = makeState();
+  const res = text(await swapHandlers.swap({ sell_coin: 'USDC', buy_coin: 'SUI', amount: 2, dry_run: true }, state));
+  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed\.$/);
+  assert.equal(calls.executed.length, 0);
+});
+
 test('a swap remainder smaller than one lot is returned, not treated as missing liquidity', async () => {
   // The live case: 2 USDSUI buys 1.8 SUI in 0.1 SUI lots at 1.075, leaving 0.065 USDSUI
   const lotBook = {
