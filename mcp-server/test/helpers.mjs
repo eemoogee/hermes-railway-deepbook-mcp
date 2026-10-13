@@ -8,6 +8,9 @@ delete process.env.MAX_SLIPPAGE_PCT;
 
 const { Ed25519Keypair } = await import('@mysten/sui/keypairs/ed25519');
 
+/** A realistic swap gas block in MIST: 0.00075 + 0.00456 - 0.0038 = 0.00151 SUI net */
+const GAS_USED = { computationCost: '750000', storageCost: '4560000', storageRebate: '3800000', nonRefundableStorageFee: '38384' };
+
 /**
  * book: { mid, quoteOut(baseQty) -> { quoteOut, baseOut }, baseOut(quoteQty) -> { baseOut, quoteOut } }
  */
@@ -62,7 +65,7 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
       calls.executed.push(transaction);
       return failTx
         ? { $kind: 'FailedTransaction', FailedTransaction: { digest: 'FAILED_DIGEST', status: { success: false, error: { message: 'MoveAbort 7' } } } }
-        : { $kind: 'Transaction', Transaction: { digest: 'TEST_DIGEST', status: { success: true } } };
+        : { $kind: 'Transaction', Transaction: { digest: 'TEST_DIGEST', status: { success: true }, effects: { gasUsed: GAS_USED } } };
     },
     simulateTransaction: async ({ transaction }) => {
       calls.simulated.push(transaction);
@@ -74,7 +77,7 @@ export function makeState({ book = defaultBook(), failTx = false } = {}) {
             { coinType: '0x2::sui::SUI', address: keypair.toSuiAddress(), amount: '-1000000000' },
             { coinType: '0x2::sui::SUI', address: '0x' + 'c'.repeat(64), amount: '1000000000' },
           ],
-          effects: { gasUsed: { computationCost: '1000' } },
+          effects: { gasUsed: GAS_USED },
         },
       };
     },

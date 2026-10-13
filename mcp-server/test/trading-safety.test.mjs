@@ -243,7 +243,8 @@ test('swap picks the pool and direction from sell_coin and buy_coin', async () =
   assert.equal(res.buy.coin, 'SUI');
   assert.equal(sdkCall(buySui.calls, 'swapExactQuoteForBase').args[0].amount, 2);
   assert.equal(sdkCall(buySui.calls, 'swapExactBaseForQuote'), undefined);
-  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC/);
+  assert.match(res.summary, /^Swap sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC.* Network fee 0\.00151 SUI\.$/);
+  assert.equal(res.gas_fee_sui, 0.00151);
 
   // Selling the base coin: swapExactBaseForQuote
   const sellSui = makeState();
@@ -264,7 +265,9 @@ test('swap refuses pairs outside the allowed pools and mismatched pools', async 
 test('a swap dry run summary names both coins and the simulation result', async () => {
   const { state, calls } = makeState();
   const res = text(await swapHandlers.swap({ sell_coin: 'USDC', buy_coin: 'SUI', amount: 2, dry_run: true }, state));
-  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed\.$/);
+  assert.match(res.summary, /^Dry run, nothing was sent: sell 2 USDC for about [\d.]+ SUI on SUI_USDC \(minimum [\d.]+ SUI\); the simulation says it would succeed, network fee about 0\.00151 SUI\.$/);
+  assert.equal(res.simulation.gas_fee_sui, 0.00151);
+  assert.equal(res.simulation.gas_used_mist.computationCost, '750000');
   assert.equal(calls.executed.length, 0);
 });
 

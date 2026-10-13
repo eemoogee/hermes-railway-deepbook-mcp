@@ -32,8 +32,11 @@ function poolCoins(pool: string): { base: string; quote: string } {
   return { base: p.baseCoin, quote: p.quoteCoin };
 }
 
-function describeSimulation(simulation: { would_succeed: boolean; error: unknown }): string {
-  if (simulation.would_succeed) return 'the simulation says it would succeed';
+function describeSimulation(simulation: { would_succeed: boolean; error: unknown; gas_fee_sui: number | null }): string {
+  if (simulation.would_succeed) {
+    return 'the simulation says it would succeed' +
+      (simulation.gas_fee_sui !== null ? `, network fee about ${Number(simulation.gas_fee_sui.toPrecision(3))} SUI` : '');
+  }
   const reason = typeof simulation.error === 'string' ? simulation.error : JSON.stringify(simulation.error);
   return `the simulation says it would FAIL: ${reason}`;
 }
@@ -101,11 +104,12 @@ async function runSwap(
   }
 
   const result = await executeTransaction(tx, state);
-  const summary = `Swap sent: ${trade}. Digest ${result.tx_digest}.`;
+  const fee = result.gas_fee_sui !== null ? ` Network fee ${Number(result.gas_fee_sui.toPrecision(3))} SUI.` : '';
+  const summary = `Swap sent: ${trade}. Digest ${result.tx_digest}.${fee}`;
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify({ summary, success: true, tx_digest: result.tx_digest, ...swap, dry_run: false }, null, 2),
+      text: JSON.stringify({ summary, success: true, tx_digest: result.tx_digest, gas_fee_sui: result.gas_fee_sui, ...swap, dry_run: false }, null, 2),
     }],
   };
 }
